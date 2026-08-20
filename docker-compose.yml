@@ -1,0 +1,51 @@
+version: "3.8"
+
+# Local development / reference deployment topology, matching the
+# Phase 1 infrastructure diagram (Internet → Nginx → API → Postgres).
+# Production secrets belong in a real .env file or secret manager —
+# never in this file.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: withunion
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: withunion_clinic
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U withunion"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./server
+    restart: unless-stopped
+    env_file:
+      - ./server/.env
+    environment:
+      DATABASE_URL: postgres://withunion:changeme@postgres:5432/withunion_clinic
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf.example:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

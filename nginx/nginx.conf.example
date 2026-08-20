@@ -1,0 +1,32 @@
+# Reference config — HTTPS/cert lines are commented out here since
+# certs are provisioned per-environment (e.g., via certbot). Uncomment
+# and adjust for the real clinic.withunion.net deployment.
+
+server {
+    listen 80;
+    server_name clinic.withunion.net;
+
+    # listen 443 ssl;
+    # ssl_certificate     /etc/letsencrypt/live/clinic.withunion.net/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/clinic.withunion.net/privkey.pem;
+
+    client_max_body_size 5m;
+
+    location /api/ {
+        proxy_pass http://api:4000/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /health {
+        proxy_pass http://api:4000/health;
+    }
+
+    # Frontend static build (added when the frontend foundation lands).
+    location / {
+        proxy_pass http://api:4000/;
+        proxy_set_header Host $host;
+    }
+}
