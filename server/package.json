@@ -8,8 +8,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "migrate:up": "NODE_OPTIONS=\"--require tsx/cjs\" node-pg-migrate up -j ts --migration-file-language ts -m src/db/migrations",
-    "migrate:down": "NODE_OPTIONS=\"--require tsx/cjs\" node-pg-migrate down -j ts --migration-file-language ts -m src/db/migrations",            "migrate:create": "node-pg-migrate create -j ts -m src/db/migrations",
+    "migrate:up": "NODE_OPTIONS=\"--require tsx/cjs\" node-pg-migrate up -j ts --migration-file-language ts",
+    "migrate:down": "NODE_OPTIONS=\"--require tsx/cjs\" node-pg-migrate down -j ts --migration-file-language ts",
+    "migrate:create": "node-pg-migrate create -j ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src --ext .ts"
