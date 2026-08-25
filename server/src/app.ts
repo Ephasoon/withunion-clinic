@@ -12,6 +12,7 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { authRouter } from "./modules/auth/auth.routes";
 import { usersRouter } from "./modules/users/users.routes";
 import { patientsRouter } from "./modules/patients/patients.routes";
+import { visitsRouter } from "./modules/visits/visits.routes";
 
 const PgSession = connectPgSimple(session);
 
@@ -62,6 +63,7 @@ export function createApp(): Express {
   app.use("/api/v1/auth", authRouter);
   app.use("/api/v1/users", usersRouter);
   app.use("/api/v1/patients", patientsRouter);
+  app.use("/api/v1/visits", visitsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
