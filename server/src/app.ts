@@ -13,6 +13,7 @@ import { authRouter } from "./modules/auth/auth.routes";
 import { usersRouter } from "./modules/users/users.routes";
 import { patientsRouter } from "./modules/patients/patients.routes";
 import { visitsRouter } from "./modules/visits/visits.routes";
+import { nursingRouter } from "./modules/nursing/nursing.routes";
 
 const PgSession = connectPgSimple(session);
 
@@ -64,6 +65,10 @@ export function createApp(): Express {
   app.use("/api/v1/users", usersRouter);
   app.use("/api/v1/patients", patientsRouter);
   app.use("/api/v1/visits", visitsRouter);
+  // Mounted at the same base as visitsRouter — nursing endpoints are
+  // sub-resources of a visit (/visits/:id/vitals, /visits/:id/nursing-assessment),
+  // matching the approved Phase 3 API design (§3.3).
+  app.use("/api/v1/visits", nursingRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
