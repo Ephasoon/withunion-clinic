@@ -29,6 +29,7 @@ export async function seedTestUsers() {
   await upsertUser("test.pharmacy", "Test Pharmacy", "pharmacy", true);
   await upsertUser("test.nurse", "Test Nurse", "nurse", true);
   await upsertUser("test.doctor", "Test Doctor", "doctor", true);
+await upsertUser("test.doctor2", "Test Doctor Two", "doctor", true);
   await upsertUser("test.lab", "Test Lab Tech", "lab_tech", true);
   await upsertUser("test.inactive", "Test Inactive", "nurse", false);
 }
