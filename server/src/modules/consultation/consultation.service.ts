@@ -1,4 +1,5 @@
-import { pool } from "../../config/db";
+import { PoolClient } from "pg";
+import { pool, withTransaction } from "../../config/db";
 import { AppError } from "../../utils/appError";
 import { getVisitById, transitionVisit } from "../visits/visits.service";
 import { CreateLabOrderInput, CreatePrescriptionInput } from "./consultation.schema";
@@ -210,6 +211,15 @@ export async function createDiagnosis(
  * Creates a lab order + its items. This is a record-only action —
  * status starts at REQUESTED and nothing here processes results;
  * fulfillment is out of scope until the Laboratory phase.
+ *
+ * FIX (post-20a12d0 correction): the order-row insert and the
+ * items-insert now run inside a single withTransaction() call, using
+ * the same client for both statements — matching the pattern already
+ * established by visits.service.ts's createVisit(). Previously these
+ * were two independent pool.query() calls; a failure between them
+ * (e.g. a dropped connection) could have left a laboratory_orders row
+ * with zero items. No schema, RBAC, validation, or response-shape
+ * change — this is purely an atomicity correction.
  */
 export async function createLabOrder(
   consultationId: string,
@@ -218,46 +228,56 @@ export async function createLabOrder(
 ): Promise<LabOrder> {
   const consultation = await requireOwnOpenConsultation(consultationId, doctorId);
 
-  const orderResult = await pool.query<{
-    id: string;
-    visit_id: string;
-    consultation_id: string;
-    requested_by: string;
-    status: string;
-    requested_at: string;
-  }>(
-    `INSERT INTO laboratory_orders (visit_id, consultation_id, requested_by)
-     VALUES ($1, $2, $3) RETURNING *`,
-    [consultation.visitId, consultationId, doctorId]
-  );
-  const order = orderResult.rows[0];
+  return withTransaction(async (client: PoolClient) => {
+    const orderResult = await client.query<{
+      id: string;
+      visit_id: string;
+      consultation_id: string;
+      requested_by: string;
+      status: string;
+      requested_at: string;
+    }>(
+      `INSERT INTO laboratory_orders (visit_id, consultation_id, requested_by)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [consultation.visitId, consultationId, doctorId]
+    );
+    const order = orderResult.rows[0];
 
-  const itemValues: string[] = [];
-  const params: unknown[] = [order.id];
-  input.testNames.forEach((name, i) => {
-    itemValues.push(`($1, $${i + 2})`);
-    params.push(name);
+    const itemValues: string[] = [];
+    const params: unknown[] = [order.id];
+    input.testNames.forEach((name, i) => {
+      itemValues.push(`($1, $${i + 2})`);
+      params.push(name);
+    });
+    await client.query(
+      `INSERT INTO laboratory_order_items (order_id, test_name) VALUES ${itemValues.join(", ")}`,
+      params
+    );
+
+    return {
+      id: order.id,
+      visitId: order.visit_id,
+      consultationId: order.consultation_id,
+      requestedBy: order.requested_by,
+      status: order.status,
+      requestedAt: order.requested_at,
+      testNames: input.testNames,
+    };
   });
-  await pool.query(
-    `INSERT INTO laboratory_order_items (order_id, test_name) VALUES ${itemValues.join(", ")}`,
-    params
-  );
-
-  return {
-    id: order.id,
-    visitId: order.visit_id,
-    consultationId: order.consultation_id,
-    requestedBy: order.requested_by,
-    status: order.status,
-    requestedAt: order.requested_at,
-    testNames: input.testNames,
-  };
 }
 
 /**
  * Creates a prescription + its items. Record-only — dispensing and
  * inventory deduction are out of scope until the Pharmacy phase.
  * medicineName is free text (see migration/schema comments).
+ *
+ * FIX (post-20a12d0 correction): the prescription-row insert and the
+ * per-item inserts (previously N+1 separate pool.query() calls, the
+ * worst version of the atomicity gap — a failure on any item left a
+ * partially-populated prescription) now all run on the same client
+ * inside a single withTransaction() call. Same pattern as
+ * createLabOrder() above and createVisit() in visits.service.ts. No
+ * schema, RBAC, validation, or response-shape change.
  */
 export async function createPrescription(
   consultationId: string,
@@ -266,65 +286,67 @@ export async function createPrescription(
 ): Promise<Prescription> {
   const consultation = await requireOwnOpenConsultation(consultationId, doctorId);
 
-  const prescriptionResult = await pool.query<{
-    id: string;
-    visit_id: string;
-    consultation_id: string;
-    doctor_id: string;
-    created_at: string;
-  }>(
-    `INSERT INTO prescriptions (visit_id, consultation_id, doctor_id) VALUES ($1, $2, $3) RETURNING *`,
-    [consultation.visitId, consultationId, doctorId]
-  );
-  const prescription = prescriptionResult.rows[0];
-
-  const items = [];
-  for (const item of input.items) {
-    const itemResult = await pool.query<{
+  return withTransaction(async (client: PoolClient) => {
+    const prescriptionResult = await client.query<{
       id: string;
-      medicine_name: string;
-      strength: string | null;
-      dosage: string | null;
-      frequency: string | null;
-      duration: string | null;
-      quantity_prescribed: number | null;
-      status: string;
+      visit_id: string;
+      consultation_id: string;
+      doctor_id: string;
+      created_at: string;
     }>(
-      `INSERT INTO prescription_items
-         (prescription_id, medicine_name, strength, dosage, frequency, duration, quantity_prescribed)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [
-        prescription.id,
-        item.medicineName,
-        item.strength ?? null,
-        item.dosage ?? null,
-        item.frequency ?? null,
-        item.duration ?? null,
-        item.quantityPrescribed ?? null,
-      ]
+      `INSERT INTO prescriptions (visit_id, consultation_id, doctor_id) VALUES ($1, $2, $3) RETURNING *`,
+      [consultation.visitId, consultationId, doctorId]
     );
-    const row = itemResult.rows[0];
-    items.push({
-      id: row.id,
-      medicineName: row.medicine_name,
-      strength: row.strength,
-      dosage: row.dosage,
-      frequency: row.frequency,
-      duration: row.duration,
-      quantityPrescribed: row.quantity_prescribed,
-      status: row.status,
-    });
-  }
+    const prescription = prescriptionResult.rows[0];
 
-  return {
-    id: prescription.id,
-    visitId: prescription.visit_id,
-    consultationId: prescription.consultation_id,
-    doctorId: prescription.doctor_id,
-    createdAt: prescription.created_at,
-    items,
-  };
+    const items = [];
+    for (const item of input.items) {
+      const itemResult = await client.query<{
+        id: string;
+        medicine_name: string;
+        strength: string | null;
+        dosage: string | null;
+        frequency: string | null;
+        duration: string | null;
+        quantity_prescribed: number | null;
+        status: string;
+      }>(
+        `INSERT INTO prescription_items
+           (prescription_id, medicine_name, strength, dosage, frequency, duration, quantity_prescribed)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [
+          prescription.id,
+          item.medicineName,
+          item.strength ?? null,
+          item.dosage ?? null,
+          item.frequency ?? null,
+          item.duration ?? null,
+          item.quantityPrescribed ?? null,
+        ]
+      );
+      const row = itemResult.rows[0];
+      items.push({
+        id: row.id,
+        medicineName: row.medicine_name,
+        strength: row.strength,
+        dosage: row.dosage,
+        frequency: row.frequency,
+        duration: row.duration,
+        quantityPrescribed: row.quantity_prescribed,
+        status: row.status,
+      });
+    }
+
+    return {
+      id: prescription.id,
+      visitId: prescription.visit_id,
+      consultationId: prescription.consultation_id,
+      doctorId: prescription.doctor_id,
+      createdAt: prescription.created_at,
+      items,
+    };
+  });
 }
 
 export async function getDiagnosesForConsultation(consultationId: string): Promise<Diagnosis[]> {

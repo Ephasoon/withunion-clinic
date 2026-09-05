@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
-import { seedTestUsers, closeTestPool, createTestPatient, TEST_PASSWORD } from "./setup";
+import { seedTestUsers, closeTestPool, createTestPatient, TEST_PASSWORD, getUserIdByUsername } from "./setup";
+import { pool } from "../src/config/db";
+import { createLabOrder, createPrescription } from "../src/modules/consultation/consultation.service";
 
 const app = createApp();
 
@@ -11,7 +13,6 @@ async function loginAs(username: string) {
   return agent;
 }
 
-/** Creates a visit and advances it to WAITING_FOR_DOCTOR, ready for the doctor. */
 async function createVisitWaitingForDoctor() {
   const reception = await loginAs("test.reception");
   const patient = await createTestPatient(`Consult Test Patient ${Date.now()}-${Math.random()}`);
@@ -81,9 +82,6 @@ describe("POST /api/v1/visits/:id/consultations (open)", () => {
     const { doctor, res: firstRes } = await openConsultationAsDoctor(visitId);
     expect(firstRes.status).toBe(201);
 
-    // Visit is now WITH_DOCTOR with an open consultation — a second
-    // open attempt must be rejected, not silently create a second
-    // concurrently-open consultation row.
     const secondRes = await doctor.post(`/api/v1/visits/${visitId}/consultations`);
     expect(secondRes.status).toBe(409);
     expect(secondRes.body.error.code).toBe("CONSULTATION_ALREADY_OPEN");
@@ -94,10 +92,6 @@ describe("POST /api/v1/visits/:id/consultations (open)", () => {
     const { doctor, consultationId } = await openConsultationAsDoctor(visitId);
     await doctor.post(`/api/v1/consultations/${consultationId}/complete`); // -> WAITING_FOR_BILLING
 
-    // WAITING_FOR_BILLING is neither WAITING_FOR_DOCTOR nor WITH_DOCTOR,
-    // so a same-visit re-open correctly still fails here — but for a
-    // different reason (visit state), confirming the two guards are
-    // independent checks, not one masking the other.
     const res = await doctor.post(`/api/v1/visits/${visitId}/consultations`);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe("INVALID_VISIT_STATE");
@@ -133,7 +127,6 @@ describe("PATCH /api/v1/consultations/:id (notes, own record only)", () => {
     const { visitId } = await createVisitWaitingForDoctor();
     const { consultationId } = await openConsultationAsDoctor(visitId, "test.doctor");
 
-    // test.doctor2 is created lazily below if needed — see setup note.
     const otherDoctor = await loginAs("test.doctor2");
     const res = await otherDoctor.patch(`/api/v1/consultations/${consultationId}`).send({ notes: "Hijack attempt" });
     expect(res.status).toBe(403);
@@ -278,9 +271,6 @@ describe("Re-opening after lab review — multiple consultations per visit", () 
     await lab.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "AT_LAB" });
     await lab.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "LAB_COMPLETED" });
 
-    // LAB_COMPLETED -> WITH_DOCTOR is the existing, unmodified
-    // transition (Phase 1 §4.1) — it goes directly to WITH_DOCTOR,
-    // never back through WAITING_FOR_DOCTOR.
     const reviewTransition = await doctor
       .post(`/api/v1/visits/${visitId}/transition`)
       .send({ toStatus: "WITH_DOCTOR" });
@@ -291,9 +281,80 @@ describe("Re-opening after lab review — multiple consultations per visit", () 
     expect(res.status).toBe(201);
     expect(res.body.data.consultation.id).not.toBe(firstConsultId);
 
-    // Both consultations exist, linked to the same visit — confirms
-    // the approved "multiple consultations per visit" design.
     const firstDetail = await doctor.get(`/api/v1/consultations/${firstConsultId}`);
     expect(firstDetail.body.data.consultation.visitId).toBe(visitId);
+  });
+});
+
+/**
+ * These tests bypass the HTTP/Zod layer and call the service
+ * functions directly — the same pattern tests/setup.ts already uses
+ * for createPatient() — specifically so we can pass a value Zod would
+ * normally reject (a name over the varchar(255) column limit) and
+ * force a REAL Postgres constraint violation partway through a
+ * multi-row write. This is what the withTransaction() fix in
+ * createLabOrder()/createPrescription() actually guards against: a
+ * failure between the parent-row insert and the item-row insert(s)
+ * must roll back everything, not leave an orphaned/partial record.
+ * No mocking — real Postgres, real constraint, real rollback.
+ */
+describe("Atomicity — createLabOrder/createPrescription roll back fully on a mid-write failure", () => {
+  it("createLabOrder leaves no orphaned laboratory_orders row when the items insert fails", async () => {
+    const { visitId } = await createVisitWaitingForDoctor();
+    const { consultationId } = await openConsultationAsDoctor(visitId);
+    const doctorId = await getUserIdByUsername("test.doctor");
+
+    const tooLong = "X".repeat(300); // exceeds test_name varchar(255) — real DB-level failure, not a Zod rejection
+    await expect(
+      createLabOrder(consultationId, doctorId, { testNames: ["CBC", tooLong] })
+    ).rejects.toThrow();
+
+    const orphanCheck = await pool.query(
+      `SELECT * FROM laboratory_orders WHERE consultation_id = $1`,
+      [consultationId]
+    );
+    expect(orphanCheck.rowCount).toBe(0); // the order row itself must not survive the failed items insert
+  });
+
+  it("createPrescription rolls back an already-inserted first item when a later item fails", async () => {
+    const { visitId } = await createVisitWaitingForDoctor();
+    const { consultationId } = await openConsultationAsDoctor(visitId);
+    const doctorId = await getUserIdByUsername("test.doctor");
+
+    const tooLong = "X".repeat(300); // exceeds medicine_name varchar(255)
+    await expect(
+      createPrescription(consultationId, doctorId, {
+        items: [{ medicineName: "Paracetamol" }, { medicineName: tooLong }],
+      })
+    ).rejects.toThrow();
+
+    const prescriptionCheck = await pool.query(
+      `SELECT * FROM prescriptions WHERE consultation_id = $1`,
+      [consultationId]
+    );
+    expect(prescriptionCheck.rowCount).toBe(0); // the prescription row itself must not survive
+
+    // Before the fix, "Paracetamol" (item 1) would have committed on
+    // its own INSERT before item 2 failed — this is the specific
+    // partial-write bug the transaction wrap closes.
+    const itemCheck = await pool.query(
+      `SELECT * FROM prescription_items WHERE medicine_name = 'Paracetamol'
+       AND prescription_id IN (SELECT id FROM prescriptions WHERE consultation_id = $1)`,
+      [consultationId]
+    );
+    expect(itemCheck.rowCount).toBe(0);
+  });
+
+  it("a normal-sized createLabOrder still succeeds and is fully queryable (fix didn't break the happy path)", async () => {
+    const { visitId } = await createVisitWaitingForDoctor();
+    const { consultationId } = await openConsultationAsDoctor(visitId);
+    const doctorId = await getUserIdByUsername("test.doctor");
+
+    const order = await createLabOrder(consultationId, doctorId, { testNames: ["CBC", "Urinalysis"] });
+
+    const itemCount = await pool.query(`SELECT count(*) FROM laboratory_order_items WHERE order_id = $1`, [
+      order.id,
+    ]);
+    expect(Number(itemCount.rows[0].count)).toBe(2);
   });
 });
