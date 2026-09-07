@@ -15,6 +15,7 @@ import { patientsRouter } from "./modules/patients/patients.routes";
 import { visitsRouter } from "./modules/visits/visits.routes";
 import { nursingRouter } from "./modules/nursing/nursing.routes";
 import { consultationRouter } from "./modules/consultation/consultation.routes";
+import { laboratoryRouter } from "./modules/laboratory/laboratory.routes";
 
 const PgSession = connectPgSimple(session);
 
@@ -71,6 +72,7 @@ export function createApp(): Express {
   // matching the approved Phase 3 API design (§3.3).
   app.use("/api/v1/visits", nursingRouter);
   app.use("/api/v1", consultationRouter);
+  app.use("/api/v1/laboratory", laboratoryRouter);
 
 
   app.use(notFoundHandler);
