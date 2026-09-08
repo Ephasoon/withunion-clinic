@@ -16,6 +16,8 @@ import { visitsRouter } from "./modules/visits/visits.routes";
 import { nursingRouter } from "./modules/nursing/nursing.routes";
 import { consultationRouter } from "./modules/consultation/consultation.routes";
 import { laboratoryRouter } from "./modules/laboratory/laboratory.routes";
+import { pharmacyRouter } from "./modules/pharmacy/pharmacy.routes";
+import { inventoryRouter } from "./modules/inventory/inventory.routes";
 
 const PgSession = connectPgSimple(session);
 
@@ -73,6 +75,8 @@ export function createApp(): Express {
   app.use("/api/v1/visits", nursingRouter);
   app.use("/api/v1", consultationRouter);
   app.use("/api/v1/laboratory", laboratoryRouter);
+  app.use("/api/v1/pharmacy", pharmacyRouter);
+  app.use("/api/v1/inventory", inventoryRouter);
 
 
   app.use(notFoundHandler);
