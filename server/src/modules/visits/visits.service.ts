@@ -85,15 +85,6 @@ const VISIT_SELECT = `
   JOIN patients p ON p.id = v.patient_id
 `;
 
-/**
- * Creates a visit for an existing patient. This is the "__new__" →
- * REGISTERED transition described in QUEUE_TRANSITIONS (reception
- * only, enforced by the route's requireRole) — modeled here as a
- * dedicated creation path rather than routed through the generic
- * transition endpoint, since there is no existing visit id yet.
- * Runs in a transaction: the visit row and its first queue_events
- * row are written together or not at all.
- */
 export async function createVisit(patientId: string, createdBy: string): Promise<Visit> {
   const patient = await getPatientById(patientId);
   if (!patient) {
@@ -131,15 +122,9 @@ export async function getVisitHistory(visitId: string): Promise<QueueEvent[]> {
   return result.rows.map(toQueueEvent);
 }
 
-/**
- * Statuses a given role can act on right now, derived directly from
- * QUEUE_TRANSITIONS (the existing Phase 2 RBAC source of truth)
- * rather than a separately maintained list — so this can never drift
- * out of sync with what canTransition() actually allows.
- */
 function relevantFromStatuses(role: Role): string[] | null {
   if (role === "owner" || role === "reception") {
-    return null; // null = no status filter, full visibility
+    return null;
   }
   const statuses = QUEUE_TRANSITIONS[role]
     .map((t) => t.from)
@@ -147,12 +132,6 @@ function relevantFromStatuses(role: Role): string[] | null {
   return Array.from(new Set(statuses));
 }
 
-/**
- * "Today's queue" — reception/owner see every visit created today;
- * every other role sees only visits currently sitting in a status
- * that belongs to their step, so a nurse's screen doesn't fill up
- * with patients waiting on the doctor or pharmacy (Phase 1 §7/§8).
- */
 export async function listTodayVisits(role: Role): Promise<Visit[]> {
   const statuses = relevantFromStatuses(role);
 
@@ -175,31 +154,30 @@ export async function listTodayVisits(role: Role): Promise<Visit[]> {
 }
 
 /**
- * The single state-changing entrypoint every module (nursing,
- * consultation, etc.) will call in later Phase 3 steps — matches the
- * approved plan's "one endpoint every stage-change goes through"
- * design (§3.2). Enforces, in order:
- *  1. the visit exists,
- *  2. it isn't already in a terminal state (COMPLETED/CANCELLED) —
- *     a stricter guard than QUEUE_TRANSITIONS' role table alone
- *     provides, since a role's "*" wildcard entry (e.g. reception's
- *     cancel-from-anywhere) does not by itself exclude terminal
- *     states; that exclusion is applied here,
- *  3. the requesting role is allowed to make this specific
- *     from→to transition, per canTransition() (unchanged from Phase 2),
- *  4. a reason is present when cancelling.
+ * Core transition logic, parameterized on an already-open client
+ * rather than opening its own transaction. Extracted so a caller that
+ * needs the transition to participate in a larger transaction (e.g.
+ * Billing's invoice-PAID + visit-COMPLETED write) can call it inside
+ * their own withTransaction() block. Identical checks, identical SQL,
+ * identical error codes/order to what transitionVisit() always did —
+ * the only difference from before is that the initial visit read now
+ * happens on the transactional client instead of via `pool` ahead of
+ * the transaction, which closes a small pre-existing TOCTOU gap and
+ * is not an observable behavior change for any caller.
  */
-export async function transitionVisit(
+async function transitionVisitCore(
+  client: PoolClient,
   visitId: string,
   role: Role,
   toStatus: VisitStatus,
   reason: string | undefined,
   changedBy: string
 ): Promise<Visit> {
-  const visit = await getVisitById(visitId);
-  if (!visit) {
+  const visitResult = await client.query<VisitRow>(`${VISIT_SELECT} WHERE v.id = $1`, [visitId]);
+  if (!visitResult.rows[0]) {
     throw new AppError(404, "NOT_FOUND", "Visit not found");
   }
+  const visit = toVisit(visitResult.rows[0]);
 
   if (TERMINAL_STATUSES.includes(visit.status)) {
     throw new AppError(409, "VISIT_TERMINAL", `Visit is already ${visit.status} and cannot be changed further`);
@@ -217,24 +195,59 @@ export async function transitionVisit(
     throw new AppError(400, "VALIDATION_ERROR", "reason is required to cancel a visit");
   }
 
-  return withTransaction(async (client: PoolClient) => {
-    await client.query(
-      `UPDATE visits
-       SET status = $1::varchar,
-           completed_at = CASE WHEN $1::varchar = 'COMPLETED' THEN now() ELSE completed_at END,
-           cancelled_at = CASE WHEN $1::varchar = 'CANCELLED' THEN now() ELSE cancelled_at END,
-           cancel_reason = CASE WHEN $1::varchar = 'CANCELLED' THEN $2::text ELSE cancel_reason END
-       WHERE id = $3`,
-      [toStatus, reason ?? null, visitId]
-    );
+  await client.query(
+    `UPDATE visits
+     SET status = $1::varchar,
+         completed_at = CASE WHEN $1::varchar = 'COMPLETED' THEN now() ELSE completed_at END,
+         cancelled_at = CASE WHEN $1::varchar = 'CANCELLED' THEN now() ELSE cancelled_at END,
+         cancel_reason = CASE WHEN $1::varchar = 'CANCELLED' THEN $2::text ELSE cancel_reason END
+     WHERE id = $3`,
+    [toStatus, reason ?? null, visitId]
+  );
 
-    await client.query(
-      `INSERT INTO queue_events (visit_id, from_status, to_status, changed_by, reason)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [visitId, visit.status, toStatus, changedBy, reason ?? null]
-    );
+  await client.query(
+    `INSERT INTO queue_events (visit_id, from_status, to_status, changed_by, reason)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [visitId, visit.status, toStatus, changedBy, reason ?? null]
+  );
 
-    const result = await client.query<VisitRow>(`${VISIT_SELECT} WHERE v.id = $1`, [visitId]);
-    return toVisit(result.rows[0]);
-  });
+  const result = await client.query<VisitRow>(`${VISIT_SELECT} WHERE v.id = $1`, [visitId]);
+  return toVisit(result.rows[0]);
+}
+
+/**
+ * Unchanged public API — signature, behavior, atomicity guarantee,
+ * and every existing caller (Nursing, Consultation, Laboratory,
+ * Pharmacy, the generic /visits/:id/transition route) are unaffected
+ * by this refactor. Simply opens its own transaction and delegates
+ * to the extracted core.
+ */
+export async function transitionVisit(
+  visitId: string,
+  role: Role,
+  toStatus: VisitStatus,
+  reason: string | undefined,
+  changedBy: string
+): Promise<Visit> {
+  return withTransaction((client: PoolClient) =>
+    transitionVisitCore(client, visitId, role, toStatus, reason, changedBy)
+  );
+}
+
+/**
+ * For a caller that already holds a PoolClient inside its own
+ * withTransaction() block and needs this transition to be part of
+ * that same SQL transaction (currently: Billing's completion step).
+ * Does not open or close a transaction itself — the caller owns
+ * that lifecycle.
+ */
+export async function transitionVisitWithClient(
+  client: PoolClient,
+  visitId: string,
+  role: Role,
+  toStatus: VisitStatus,
+  reason: string | undefined,
+  changedBy: string
+): Promise<Visit> {
+  return transitionVisitCore(client, visitId, role, toStatus, reason, changedBy);
 }

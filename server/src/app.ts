@@ -18,14 +18,13 @@ import { consultationRouter } from "./modules/consultation/consultation.routes";
 import { laboratoryRouter } from "./modules/laboratory/laboratory.routes";
 import { pharmacyRouter } from "./modules/pharmacy/pharmacy.routes";
 import { inventoryRouter } from "./modules/inventory/inventory.routes";
+import { billingRouter } from "./modules/billing/billing.routes";
 
 const PgSession = connectPgSimple(session);
 
 export function createApp(): Express {
   const app = express();
 
-  // Trust the Nginx reverse proxy for correct req.ip / secure-cookie
-  // detection in production (Phase 1 §28 infrastructure).
   app.set("trust proxy", 1);
 
   app.use(helmet());
@@ -69,15 +68,12 @@ export function createApp(): Express {
   app.use("/api/v1/users", usersRouter);
   app.use("/api/v1/patients", patientsRouter);
   app.use("/api/v1/visits", visitsRouter);
-  // Mounted at the same base as visitsRouter — nursing endpoints are
-  // sub-resources of a visit (/visits/:id/vitals, /visits/:id/nursing-assessment),
-  // matching the approved Phase 3 API design (§3.3).
   app.use("/api/v1/visits", nursingRouter);
   app.use("/api/v1", consultationRouter);
   app.use("/api/v1/laboratory", laboratoryRouter);
   app.use("/api/v1/pharmacy", pharmacyRouter);
   app.use("/api/v1/inventory", inventoryRouter);
-
+  app.use("/api/v1/billing", billingRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
