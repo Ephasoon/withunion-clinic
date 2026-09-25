@@ -21,6 +21,8 @@ import { inventoryRouter } from "./modules/inventory/inventory.routes";
 import { billingRouter } from "./modules/billing/billing.routes";
 import { auditLogRouter } from "./modules/audit-log/audit-log.routes";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
+import { suppliersRouter } from "./modules/suppliers/suppliers.routes";
+import { purchasesRouter } from "./modules/purchases/purchases.routes";
 
 const PgSession = connectPgSimple(session);
 
@@ -78,6 +80,8 @@ export function createApp(): Express {
   app.use("/api/v1/billing", billingRouter);
   app.use("/api/v1/audit-logs", auditLogRouter);
   app.use("/api/v1/dashboard", dashboardRouter);
+  app.use("/api/v1/suppliers", suppliersRouter);
+  app.use("/api/v1/purchases", purchasesRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
