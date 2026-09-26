@@ -24,7 +24,12 @@ const EnvSchema = z.object({
   LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
 
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", 
+"trace"]).default("info"),
+
+  CLINIC_NAME: z.string().default("WithUnion Clinic"),
+  CLINIC_ADDRESS: z.string().default(""),
+  CLINIC_PHONE: z.string().default(""),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

@@ -23,6 +23,7 @@ import { auditLogRouter } from "./modules/audit-log/audit-log.routes";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
 import { suppliersRouter } from "./modules/suppliers/suppliers.routes";
 import { purchasesRouter } from "./modules/purchases/purchases.routes";
+import { receiptsRouter } from "./modules/receipts/receipts.routes";
 
 const PgSession = connectPgSimple(session);
 
@@ -82,6 +83,7 @@ export function createApp(): Express {
   app.use("/api/v1/dashboard", dashboardRouter);
   app.use("/api/v1/suppliers", suppliersRouter);
   app.use("/api/v1/purchases", purchasesRouter);
+  app.use("/api/v1/receipts", receiptsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
