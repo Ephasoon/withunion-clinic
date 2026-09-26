@@ -24,6 +24,7 @@ import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
 import { suppliersRouter } from "./modules/suppliers/suppliers.routes";
 import { purchasesRouter } from "./modules/purchases/purchases.routes";
 import { receiptsRouter } from "./modules/receipts/receipts.routes";
+import { reportsRouter } from "./modules/reports/reports.routes";
 
 const PgSession = connectPgSimple(session);
 
@@ -84,6 +85,7 @@ export function createApp(): Express {
   app.use("/api/v1/suppliers", suppliersRouter);
   app.use("/api/v1/purchases", purchasesRouter);
   app.use("/api/v1/receipts", receiptsRouter);
+  app.use("/api/v1/reports", reportsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
