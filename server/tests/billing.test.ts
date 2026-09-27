@@ -389,6 +389,47 @@ describe("Completion", () => {
   });
 });
 
+describe("Generic transition endpoint cannot bypass billing completion", () => {
+  it("rejects generic COMPLETED for a fully paid but still OPEN invoice; billing completion then succeeds", async () => {
+    const { visitId } = await createVisitWaitingForBilling();
+    const { reception, invoiceId } = await createInvoiceFor(visitId);
+    await reception.post(`/api/v1/billing/invoices/${invoiceId}/items`).send({ items: [{ description: "X", quantity: 1, unitPrice: 100 }] });
+    await reception.post(`/api/v1/billing/invoices/${invoiceId}/payments`).send({ amount: 100, method: "cash" });
+
+    const bypass = await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "COMPLETED" });
+    expect(bypass.status).toBe(403);
+    expect(bypass.body.error.code).toBe("FORBIDDEN");
+
+    const invoiceRow = await pool.query("SELECT status FROM invoices WHERE id = $1", [invoiceId]);
+    expect(invoiceRow.rows[0].status).toBe("OPEN");
+    const visitRow = await pool.query("SELECT status, completed_at FROM visits WHERE id = $1", [visitId]);
+    expect(visitRow.rows[0].status).toBe("WAITING_FOR_BILLING");
+    expect(visitRow.rows[0].completed_at).toBeNull();
+
+    const res = await reception.post(`/api/v1/billing/invoices/${invoiceId}/complete`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.invoice.status).toBe("PAID");
+    expect(res.body.data.visitStatus).toBe("COMPLETED");
+  });
+
+  it("rejects generic COMPLETED even when a PAID invoice already exists for the visit", async () => {
+    const { visitId } = await createVisitWaitingForBilling();
+    const { reception, invoiceId } = await createInvoiceFor(visitId);
+    // Out-of-band PAID state (e.g. data repair) must still not open
+    // the generic endpoint — only Billing's completion flow completes.
+    await pool.query("UPDATE invoices SET status = 'PAID' WHERE id = $1", [invoiceId]);
+    const queueEventsBefore = await pool.query("SELECT count(*) FROM queue_events WHERE visit_id = $1", [visitId]);
+
+    const res = await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "COMPLETED" });
+    expect(res.status).toBe(403);
+
+    const visitRow = await pool.query("SELECT status FROM visits WHERE id = $1", [visitId]);
+    expect(visitRow.rows[0].status).toBe("WAITING_FOR_BILLING");
+    const queueEventsAfter = await pool.query("SELECT count(*) FROM queue_events WHERE visit_id = $1", [visitId]);
+    expect(queueEventsAfter.rows[0].count).toBe(queueEventsBefore.rows[0].count);
+  });
+});
+
 describe("Concurrency — addInvoiceItems() vs completeBilling()", () => {
   it("a genuine concurrent race between adding an item and completing cannot produce a PAID invoice with a positive balance", async () => {
     const { visitId } = await createVisitWaitingForBilling();

@@ -98,7 +98,7 @@ describe("Role-controlled queue transitions (Phase 1 §4.4)", () => {
     expect(res.status).toBe(403);
   });
 
-  it("full happy-path chain: reception -> nurse -> doctor -> lab -> doctor -> billing -> reception completes", async () => {
+  it("full happy-path chain: reception -> nurse -> doctor -> lab -> doctor -> billing, with generic completion refused", async () => {
     const { reception, visitId } = await createVisitAsReception();
 
     let res = await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WAITING_FOR_NURSE" });
@@ -150,16 +150,19 @@ describe("Role-controlled queue transitions (Phase 1 §4.4)", () => {
       .send({ toStatus: "COMPLETED" });
     expect(doctorOverreach.status).toBe(403);
 
+    // Not even reception can complete generically — COMPLETED is only
+    // reachable through Billing's completion flow (see billing.test.ts).
     res = await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "COMPLETED" });
-    expect(res.status).toBe(200);
-    expect(res.body.data.visit.status).toBe("COMPLETED");
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("FORBIDDEN");
 
     const detail = await reception.get(`/api/v1/visits/${visitId}`);
-    // creation + 10 successful transitions (WAITING_FOR_NURSE, WITH_NURSE,
+    expect(detail.body.data.visit.status).toBe("WAITING_FOR_BILLING");
+    // creation + 9 successful transitions (WAITING_FOR_NURSE, WITH_NURSE,
     // WAITING_FOR_DOCTOR, WITH_DOCTOR, WAITING_FOR_LAB, AT_LAB, LAB_COMPLETED,
-    // WITH_DOCTOR again, WAITING_FOR_BILLING, COMPLETED) = 11 ledger rows.
-    // The three rejected overreach attempts write nothing.
-    expect(detail.body.data.history).toHaveLength(11);
+    // WITH_DOCTOR again, WAITING_FOR_BILLING) = 10 ledger rows.
+    // The four rejected attempts write nothing.
+    expect(detail.body.data.history).toHaveLength(10);
   });
 
   it("doctor can send a visit straight to billing when no lab/pharmacy is needed", async () => {
@@ -183,6 +186,56 @@ describe("Role-controlled queue transitions (Phase 1 §4.4)", () => {
       .send({ toStatus: "WAITING_FOR_DOCTOR" });
     expect(res.status).toBe(200);
     expect(res.body.data.visit.status).toBe("WAITING_FOR_DOCTOR");
+  });
+});
+
+describe("Generic completion bypass (COMPLETED is billing-only)", () => {
+  async function createVisitWaitingForBillingGenerically() {
+    const { reception, visitId } = await createVisitAsReception();
+    await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WAITING_FOR_DOCTOR" });
+    const doctor = await loginAs("test.doctor");
+    await doctor.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WITH_DOCTOR" });
+    await doctor.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WAITING_FOR_BILLING" });
+    return { reception, visitId };
+  }
+
+  it("reception cannot generically move WAITING_FOR_BILLING -> COMPLETED without an invoice", async () => {
+    const { reception, visitId } = await createVisitWaitingForBillingGenerically();
+    const before = await reception.get(`/api/v1/visits/${visitId}`);
+
+    const res = await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "COMPLETED" });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("FORBIDDEN");
+
+    const after = await reception.get(`/api/v1/visits/${visitId}`);
+    expect(after.body.data.visit.status).toBe("WAITING_FOR_BILLING");
+    expect(after.body.data.visit.completedAt).toBeNull();
+    expect(after.body.data.history).toHaveLength(before.body.data.history.length);
+  });
+
+  it("no other role can generically complete a visit either", async () => {
+    const { visitId } = await createVisitWaitingForBillingGenerically();
+    for (const username of ["test.owner", "test.nurse", "test.doctor", "test.lab", "test.pharmacy"]) {
+      const agent = await loginAs(username);
+      const res = await agent.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "COMPLETED" });
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it("owner and reception can still cancel from WAITING_FOR_BILLING", async () => {
+    const { visitId } = await createVisitWaitingForBillingGenerically();
+    const owner = await loginAs("test.owner");
+    const res = await owner
+      .post(`/api/v1/visits/${visitId}/transition`)
+      .send({ toStatus: "CANCELLED", reason: "Patient left before paying" });
+    expect(res.status).toBe(200);
+    expect(res.body.data.visit.status).toBe("CANCELLED");
+
+    const { reception, visitId: otherVisitId } = await createVisitWaitingForBillingGenerically();
+    const receptionRes = await reception
+      .post(`/api/v1/visits/${otherVisitId}/transition`)
+      .send({ toStatus: "CANCELLED", reason: "Patient left before paying" });
+    expect(receptionRes.status).toBe(200);
   });
 });
 

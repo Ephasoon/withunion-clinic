@@ -171,7 +171,8 @@ async function transitionVisitCore(
   role: Role,
   toStatus: VisitStatus,
   reason: string | undefined,
-  changedBy: string
+  changedBy: string,
+  allowCompletion: boolean
 ): Promise<Visit> {
   const visitResult = await client.query<VisitRow>(`${VISIT_SELECT} WHERE v.id = $1`, [visitId]);
   if (!visitResult.rows[0]) {
@@ -189,6 +190,25 @@ async function transitionVisitCore(
       "FORBIDDEN",
       `Your role cannot move a visit from ${visit.status} to ${toStatus}`
     );
+  }
+
+  // COMPLETED is owned by Billing's completion flow. canTransition()
+  // alone can't enforce that — the generic endpoint and Billing both
+  // act as "reception" — so completion additionally requires the
+  // billing entry point (allowCompletion) AND a PAID invoice visible
+  // on this same client (Billing marks it PAID in this transaction).
+  if (toStatus === "COMPLETED") {
+    if (!allowCompletion) {
+      throw new AppError(
+        403,
+        "FORBIDDEN",
+        "A visit can only be completed through billing completion"
+      );
+    }
+    const paid = await client.query(`SELECT 1 FROM invoices WHERE visit_id = $1 AND status = 'PAID'`, [visitId]);
+    if (!paid.rows[0]) {
+      throw new AppError(403, "FORBIDDEN", "A visit cannot be completed without a PAID invoice");
+    }
   }
 
   if (toStatus === "CANCELLED" && !reason) {
@@ -230,7 +250,7 @@ export async function transitionVisit(
   changedBy: string
 ): Promise<Visit> {
   return withTransaction((client: PoolClient) =>
-    transitionVisitCore(client, visitId, role, toStatus, reason, changedBy)
+    transitionVisitCore(client, visitId, role, toStatus, reason, changedBy, false)
   );
 }
 
@@ -239,7 +259,8 @@ export async function transitionVisit(
  * withTransaction() block and needs this transition to be part of
  * that same SQL transaction (currently: Billing's completion step).
  * Does not open or close a transaction itself — the caller owns
- * that lifecycle.
+ * that lifecycle. This is the only entry point permitted to move a
+ * visit to COMPLETED, and only once its invoice is PAID.
  */
 export async function transitionVisitWithClient(
   client: PoolClient,
@@ -249,5 +270,5 @@ export async function transitionVisitWithClient(
   reason: string | undefined,
   changedBy: string
 ): Promise<Visit> {
-  return transitionVisitCore(client, visitId, role, toStatus, reason, changedBy);
+  return transitionVisitCore(client, visitId, role, toStatus, reason, changedBy, true);
 }
