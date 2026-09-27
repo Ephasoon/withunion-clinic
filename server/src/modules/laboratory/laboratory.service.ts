@@ -1,7 +1,7 @@
 import { PoolClient } from "pg";
 import { pool, withTransaction } from "../../config/db";
 import { AppError } from "../../utils/appError";
-import { transitionVisit } from "../visits/visits.service";
+import { transitionVisit, transitionVisitWithClient } from "../visits/visits.service";
 import { EnterResultsInput } from "./laboratory.schema";
 
 export interface LabOrderItem {
@@ -99,16 +99,29 @@ export async function getLabOrderDetail(orderId: string): Promise<LabOrderDetail
 }
 
 /**
+ * A visit can go through the lab more than once (LAB_COMPLETED ->
+ * WITH_DOCTOR -> WAITING_FOR_LAB), so the visit's status alone can't
+ * tell an outstanding order from one a previous lab round already
+ * finished. laboratory_orders.status carries that: REQUESTED means
+ * outstanding, COMPLETED means closed by a finished lab round (see
+ * completeLabOrder). Only REQUESTED orders may be worked on.
+ */
+function requireRequestedOrder(status: string): void {
+  if (status !== "REQUESTED") {
+    throw new AppError(409, "LAB_ORDER_NOT_REQUESTED", `Laboratory order is already ${status}`);
+  }
+}
+
+/**
  * "Pending/current" laboratory work for the technician's queue —
- * orders whose visit is still WAITING_FOR_LAB or AT_LAB. Per the
- * approved scope, laboratory_orders.status itself is left untouched
- * (always REQUESTED); the visit's status is the authoritative signal
- * for what's pending, so this filters on that instead of introducing
- * a second state to keep in sync.
+ * outstanding (REQUESTED) orders whose visit is WAITING_FOR_LAB or
+ * AT_LAB. Orders closed by an earlier lab round on the same visit
+ * are excluded.
  */
 export async function listPendingLabOrders(): Promise<LabOrderDetail[]> {
   const result = await pool.query<OrderRow>(
-    `${ORDER_SELECT} WHERE v.status IN ('WAITING_FOR_LAB', 'AT_LAB') ORDER BY lo.requested_at ASC`
+    `${ORDER_SELECT} WHERE v.status IN ('WAITING_FOR_LAB', 'AT_LAB') AND lo.status = 'REQUESTED'
+     ORDER BY lo.requested_at ASC`
   );
   return Promise.all(result.rows.map(toDetail));
 }
@@ -129,6 +142,7 @@ export async function startLabWork(orderId: string, labTechId: string): Promise<
       `Laboratory work can only start while the visit is WAITING_FOR_LAB (currently ${order.visitStatus})`
     );
   }
+  requireRequestedOrder(order.status);
 
   await transitionVisit(order.visitId, "lab_tech", "AT_LAB", undefined, labTechId);
 
@@ -173,6 +187,7 @@ export async function enterResults(
       `Results can only be entered while the visit is AT_LAB (currently ${order.visitStatus})`
     );
   }
+  requireRequestedOrder(order.status);
 
   const existingById = new Map(order.items.map((item) => [item.id, item]));
   for (const entry of input.results) {
@@ -191,6 +206,14 @@ export async function enterResults(
   }));
 
   await withTransaction(async (client: PoolClient) => {
+    // Re-check under the order row lock completeLabOrder() also takes,
+    // so results can't land on an order a concurrent completion closed.
+    const locked = await client.query<{ status: string }>(
+      `SELECT status FROM laboratory_orders WHERE id = $1 FOR UPDATE`,
+      [orderId]
+    );
+    requireRequestedOrder(locked.rows[0].status);
+
     for (const entry of input.results) {
       await client.query(
         `UPDATE laboratory_order_items
@@ -206,11 +229,13 @@ export async function enterResults(
 }
 
 /**
- * Verifies every requested item has a non-empty result, then fires
- * the existing AT_LAB -> LAB_COMPLETED transition. laboratory_orders.status
- * is deliberately left untouched (still REQUESTED) — the visit's
- * status is the single source of truth for workflow state, per the
- * approved scope (no second state machine to keep in sync).
+ * Completes the visit's current lab round — not just this one order.
+ * In one transaction: lock every REQUESTED order on the visit, require
+ * every item on every one of them to have a non-empty result, mark
+ * them all COMPLETED, then fire AT_LAB -> LAB_COMPLETED on the same
+ * client so the order updates and the visit transition commit or roll
+ * back together. An order finished by an earlier round is COMPLETED
+ * and rejected, so it can never re-advance the visit.
  */
 export async function completeLabOrder(orderId: string, labTechId: string): Promise<LabOrderDetail> {
   const order = await getLabOrderDetail(orderId);
@@ -224,17 +249,35 @@ export async function completeLabOrder(orderId: string, labTechId: string): Prom
       `Laboratory work can only be completed while the visit is AT_LAB (currently ${order.visitStatus})`
     );
   }
+  requireRequestedOrder(order.status);
 
-  const missing = order.items.filter((item) => !item.result || item.result.trim() === "");
-  if (missing.length > 0) {
-    throw new AppError(
-      409,
-      "INCOMPLETE_RESULTS",
-      `Cannot complete: missing results for ${missing.map((i) => i.testName).join(", ")}`
+  await withTransaction(async (client: PoolClient) => {
+    const outstanding = await client.query<{ id: string }>(
+      `SELECT id FROM laboratory_orders WHERE visit_id = $1 AND status = 'REQUESTED' ORDER BY id FOR UPDATE`,
+      [order.visitId]
     );
-  }
+    const orderIds = outstanding.rows.map((row) => row.id);
+    if (!orderIds.includes(orderId)) {
+      // Closed by a concurrent completion between the read above and this lock.
+      throw new AppError(409, "LAB_ORDER_NOT_REQUESTED", "Laboratory order is already COMPLETED");
+    }
 
-  await transitionVisit(order.visitId, "lab_tech", "LAB_COMPLETED", undefined, labTechId);
+    const items = await client.query<{ order_id: string; test_name: string; result: string | null }>(
+      `SELECT order_id, test_name, result FROM laboratory_order_items
+       WHERE order_id = ANY($1::uuid[]) ORDER BY test_name ASC`,
+      [orderIds]
+    );
+    const missing = items.rows.filter((item) => !item.result || item.result.trim() === "");
+    if (missing.length > 0) {
+      const names = missing.map((item) =>
+        item.order_id === orderId ? item.test_name : `${item.test_name} (order ${item.order_id})`
+      );
+      throw new AppError(409, "INCOMPLETE_RESULTS", `Cannot complete: missing results for ${names.join(", ")}`);
+    }
+
+    await client.query(`UPDATE laboratory_orders SET status = 'COMPLETED' WHERE id = ANY($1::uuid[])`, [orderIds]);
+    await transitionVisitWithClient(client, order.visitId, "lab_tech", "LAB_COMPLETED", undefined, labTechId);
+  });
 
   return (await getLabOrderDetail(orderId))!;
 }

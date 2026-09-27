@@ -606,3 +606,50 @@ describe("Transaction atomicity", () => {
     expect(itemARes.rows[0].quantity_dispensed).toBeNull();
   });
 });
+
+describe("Multiple prescriptions per visit", () => {
+  it("completing one prescription is blocked while another prescription on the visit is still PENDING", async () => {
+    const reception = await loginAs("test.reception");
+    const patient = await createTestPatient(`Pharmacy Two Rx ${Date.now()}-${Math.random()}`);
+    const visitRes = await reception.post("/api/v1/visits").send({ patientId: patient.id });
+    const visitId = visitRes.body.data.visit.id as string;
+    await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WAITING_FOR_NURSE" });
+    const nurse = await loginAs("test.nurse");
+    await nurse.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WITH_NURSE" });
+    await nurse.post(`/api/v1/visits/${visitId}/nursing-assessment`).send({ chiefComplaint: "Fever" });
+    const doctor = await loginAs("test.doctor");
+    const consultRes = await doctor.post(`/api/v1/visits/${visitId}/consultations`);
+    const consultationId = consultRes.body.data.consultation.id as string;
+    const rx1Res = await doctor
+      .post(`/api/v1/consultations/${consultationId}/prescriptions`)
+      .send({ items: [{ medicineName: "Amoxicillin" }] });
+    const rx2Res = await doctor
+      .post(`/api/v1/consultations/${consultationId}/prescriptions`)
+      .send({ items: [{ medicineName: "Paracetamol" }] });
+    const rx1 = rx1Res.body.data.prescription.id as string;
+    const rx2 = rx2Res.body.data.prescription.id as string;
+    await doctor.post(`/api/v1/consultations/${consultationId}/complete`); // -> WAITING_FOR_PHARMACY
+
+    const { pharmacy } = await startPharmacyAsTech(rx2);
+    const rx2Detail = await pharmacy.get(`/api/v1/pharmacy/prescriptions/${rx2}`);
+    await pharmacy
+      .post(`/api/v1/pharmacy/prescriptions/${rx2}/dispense`)
+      .send({ items: [{ itemId: rx2Detail.body.data.prescription.items[0].id, markUnavailable: true }] });
+
+    const blocked = await pharmacy.post(`/api/v1/pharmacy/prescriptions/${rx2}/complete`);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe("INCOMPLETE_DISPENSING");
+    expect(blocked.body.error.message).toContain("Amoxicillin");
+    const visitRow = await pool.query("SELECT status FROM visits WHERE id = $1", [visitId]);
+    expect(visitRow.rows[0].status).toBe("AT_PHARMACY");
+
+    const rx1Detail = await pharmacy.get(`/api/v1/pharmacy/prescriptions/${rx1}`);
+    await pharmacy
+      .post(`/api/v1/pharmacy/prescriptions/${rx1}/dispense`)
+      .send({ items: [{ itemId: rx1Detail.body.data.prescription.items[0].id, markUnavailable: true }] });
+
+    const res = await pharmacy.post(`/api/v1/pharmacy/prescriptions/${rx2}/complete`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.visitStatus).toBe("WAITING_FOR_BILLING");
+  });
+});

@@ -1,7 +1,7 @@
 import { PoolClient } from "pg";
 import { pool, withTransaction } from "../../config/db";
 import { AppError } from "../../utils/appError";
-import { transitionVisit } from "../visits/visits.service";
+import { transitionVisit, transitionVisitWithClient } from "../visits/visits.service";
 import { DispenseRequestInput, DispenseEntry } from "./pharmacy.schema";
 
 export interface PharmacyItem {
@@ -319,11 +319,13 @@ export async function dispense(
 }
 
 /**
- * Completes the pharmacy step and advances the visit, only once no
- * item remains PENDING. Unlike laboratory_orders.status (which
- * Laboratory deliberately left untouched), prescription_items.status
- * IS the authoritative fulfillment signal Pharmacy is responsible
- * for maintaining.
+ * Completes the visit's pharmacy step — every prescription on the
+ * visit, not just this one. prescription_items.status is the
+ * authoritative fulfillment signal. In one transaction: lock the
+ * items of every prescription on the visit, require none to be
+ * PENDING, then fire AT_PHARMACY -> WAITING_FOR_BILLING on the same
+ * client. A visit reaches pharmacy only once, so every prescription
+ * on it belongs to this step.
  */
 export async function completePharmacy(
   prescriptionId: string,
@@ -341,16 +343,36 @@ export async function completePharmacy(
     );
   }
 
-  const pending = prescription.items.filter((item) => item.status === "PENDING");
-  if (pending.length > 0) {
-    throw new AppError(
-      409,
-      "INCOMPLETE_DISPENSING",
-      `Cannot complete: still pending for ${pending.map((i) => i.medicineName).join(", ")}`
+  const visitStatus = await withTransaction(async (client: PoolClient) => {
+    const items = await client.query<{ prescription_id: string; medicine_name: string; status: string }>(
+      `SELECT pi.prescription_id, pi.medicine_name, pi.status
+       FROM prescription_items pi
+       JOIN prescriptions pr ON pr.id = pi.prescription_id
+       WHERE pr.visit_id = $1
+       ORDER BY pi.id
+       FOR UPDATE OF pi`,
+      [prescription.visitId]
     );
-  }
+    const pending = items.rows.filter((item) => item.status === "PENDING");
+    if (pending.length > 0) {
+      const names = pending.map((item) =>
+        item.prescription_id === prescriptionId
+          ? item.medicine_name
+          : `${item.medicine_name} (prescription ${item.prescription_id})`
+      );
+      throw new AppError(409, "INCOMPLETE_DISPENSING", `Cannot complete: still pending for ${names.join(", ")}`);
+    }
 
-  const visit = await transitionVisit(prescription.visitId, "pharmacy", "WAITING_FOR_BILLING", undefined, pharmacyUserId);
+    const visit = await transitionVisitWithClient(
+      client,
+      prescription.visitId,
+      "pharmacy",
+      "WAITING_FOR_BILLING",
+      undefined,
+      pharmacyUserId
+    );
+    return visit.status;
+  });
 
-  return { prescription: (await getPrescriptionDetail(prescriptionId))!, visitStatus: visit.status };
+  return { prescription: (await getPrescriptionDetail(prescriptionId))!, visitStatus };
 }

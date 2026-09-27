@@ -358,3 +358,52 @@ describe("Atomicity — createLabOrder/createPrescription roll back fully on a m
     expect(Number(itemCount.rows[0].count)).toBe(2);
   });
 });
+
+
+/**
+ * Runs a real lab round for the order (start, enter every result,
+ * complete) through the Laboratory endpoints, then moves the visit
+ * back to the doctor for review.
+ */
+async function completeLabRoundAndReturnToDoctor(visitId: string, orderId: string, doctor: Awaited<ReturnType<typeof loginAs>>) {
+  const lab = await loginAs("test.lab");
+  await lab.post(`/api/v1/laboratory/orders/${orderId}/start`);
+  const detail = await lab.get(`/api/v1/laboratory/orders/${orderId}`);
+  const results = detail.body.data.order.items.map((i: { id: string }) => ({ itemId: i.id, result: "Normal" }));
+  await lab.post(`/api/v1/laboratory/orders/${orderId}/results`).send({ results });
+  const completeRes = await lab.post(`/api/v1/laboratory/orders/${orderId}/complete`);
+  expect(completeRes.body.data.order.visitStatus).toBe("LAB_COMPLETED");
+  await doctor.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WITH_DOCTOR" });
+}
+
+describe("Completion routing is visit-wide, not per-consultation", () => {
+  it("a prescription deferred by the lab order still reaches pharmacy after a review consultation that adds nothing", async () => {
+    const { visitId } = await createVisitWaitingForDoctor();
+    const { doctor, consultationId: firstId } = await openConsultationAsDoctor(visitId);
+    const orderRes = await doctor.post(`/api/v1/consultations/${firstId}/lab-orders`).send({ testNames: ["CBC"] });
+    await doctor.post(`/api/v1/consultations/${firstId}/prescriptions`).send({ items: [{ medicineName: "Paracetamol" }] });
+    const first = await doctor.post(`/api/v1/consultations/${firstId}/complete`);
+    expect(first.body.data.visitStatus).toBe("WAITING_FOR_LAB");
+
+    await completeLabRoundAndReturnToDoctor(visitId, orderRes.body.data.labOrder.id, doctor);
+
+    const { consultationId: reviewId } = await openConsultationAsDoctor(visitId);
+    const res = await doctor.post(`/api/v1/consultations/${reviewId}/complete`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.visitStatus).toBe("WAITING_FOR_PHARMACY");
+  });
+
+  it("a lab order closed by a finished lab round does not send the visit back to lab", async () => {
+    const { visitId } = await createVisitWaitingForDoctor();
+    const { doctor, consultationId: firstId } = await openConsultationAsDoctor(visitId);
+    const orderRes = await doctor.post(`/api/v1/consultations/${firstId}/lab-orders`).send({ testNames: ["CBC"] });
+    await doctor.post(`/api/v1/consultations/${firstId}/complete`); // -> WAITING_FOR_LAB
+
+    await completeLabRoundAndReturnToDoctor(visitId, orderRes.body.data.labOrder.id, doctor);
+
+    const { consultationId: reviewId } = await openConsultationAsDoctor(visitId);
+    const res = await doctor.post(`/api/v1/consultations/${reviewId}/complete`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.visitStatus).toBe("WAITING_FOR_BILLING");
+  });
+});

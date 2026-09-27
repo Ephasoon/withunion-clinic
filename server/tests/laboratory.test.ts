@@ -391,3 +391,104 @@ describe("Transaction atomicity — enterResults rolls back completely on a mid-
     expect(outcome.order.items.every((i) => i.result !== null)).toBe(true);
   });
 });
+
+async function enterAllResults(lab: Awaited<ReturnType<typeof loginAs>>, orderId: string) {
+  const detail = await lab.get(`/api/v1/laboratory/orders/${orderId}`);
+  const results = detail.body.data.order.items.map((i: { id: string }) => ({ itemId: i.id, result: "Normal" }));
+  return lab.post(`/api/v1/laboratory/orders/${orderId}/results`).send({ results });
+}
+
+describe("Multiple lab rounds and multiple orders per visit", () => {
+  it("an order closed by an earlier lab round is not re-queued and cannot be restarted, edited, or re-completed", async () => {
+    const { visitId, doctor, orderId: orderA } = await createOrderWaitingForLab(["CBC"]);
+    const { lab } = await startLabAsTech(orderA);
+    await enterAllResults(lab, orderA);
+    const firstRound = await lab.post(`/api/v1/laboratory/orders/${orderA}/complete`);
+    expect(firstRound.status).toBe(200);
+    expect(firstRound.body.data.order.status).toBe("COMPLETED");
+
+    // Doctor reviews the result and orders a second test in a new consultation.
+    await doctor.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WITH_DOCTOR" });
+    const reviewRes = await doctor.post(`/api/v1/visits/${visitId}/consultations`);
+    const reviewId = reviewRes.body.data.consultation.id as string;
+    const orderBRes = await doctor
+      .post(`/api/v1/consultations/${reviewId}/lab-orders`)
+      .send({ testNames: ["Malaria RDT"] });
+    const orderB = orderBRes.body.data.labOrder.id as string;
+    const reviewComplete = await doctor.post(`/api/v1/consultations/${reviewId}/complete`);
+    expect(reviewComplete.body.data.visitStatus).toBe("WAITING_FOR_LAB");
+
+    const queue = await lab.get("/api/v1/laboratory/orders");
+    const queuedIds = queue.body.data.orders.map((o: { id: string }) => o.id);
+    expect(queuedIds).toContain(orderB);
+    expect(queuedIds).not.toContain(orderA);
+
+    const startOld = await lab.post(`/api/v1/laboratory/orders/${orderA}/start`);
+    expect(startOld.status).toBe(409);
+    expect(startOld.body.error.code).toBe("LAB_ORDER_NOT_REQUESTED");
+
+    const startNew = await lab.post(`/api/v1/laboratory/orders/${orderB}/start`);
+    expect(startNew.status).toBe(200);
+    expect(startNew.body.data.order.visitStatus).toBe("AT_LAB");
+
+    // The old order still has its round-one results, but can't close this round.
+    const completeOld = await lab.post(`/api/v1/laboratory/orders/${orderA}/complete`);
+    expect(completeOld.status).toBe(409);
+    expect(completeOld.body.error.code).toBe("LAB_ORDER_NOT_REQUESTED");
+
+    const editOld = await enterAllResults(lab, orderA);
+    expect(editOld.status).toBe(409);
+    expect(editOld.body.error.code).toBe("LAB_ORDER_NOT_REQUESTED");
+
+    const completeNewEarly = await lab.post(`/api/v1/laboratory/orders/${orderB}/complete`);
+    expect(completeNewEarly.status).toBe(409);
+    expect(completeNewEarly.body.error.code).toBe("INCOMPLETE_RESULTS");
+    const stillAtLab = await lab.get(`/api/v1/laboratory/orders/${orderB}`);
+    expect(stillAtLab.body.data.order.visitStatus).toBe("AT_LAB");
+
+    await enterAllResults(lab, orderB);
+    const secondRound = await lab.post(`/api/v1/laboratory/orders/${orderB}/complete`);
+    expect(secondRound.status).toBe(200);
+    expect(secondRound.body.data.order.visitStatus).toBe("LAB_COMPLETED");
+    expect(secondRound.body.data.order.status).toBe("COMPLETED");
+  });
+
+  it("completing one of two same-round orders requires results on both, then closes both", async () => {
+    const reception = await loginAs("test.reception");
+    const patient = await createTestPatient(`Lab Two Orders ${Date.now()}-${Math.random()}`);
+    const visitRes = await reception.post("/api/v1/visits").send({ patientId: patient.id });
+    const visitId = visitRes.body.data.visit.id as string;
+    await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WAITING_FOR_NURSE" });
+    const nurse = await loginAs("test.nurse");
+    await nurse.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WITH_NURSE" });
+    await nurse.post(`/api/v1/visits/${visitId}/nursing-assessment`).send({ chiefComplaint: "Fever" });
+    const doctor = await loginAs("test.doctor");
+    const consultRes = await doctor.post(`/api/v1/visits/${visitId}/consultations`);
+    const consultationId = consultRes.body.data.consultation.id as string;
+    const orderARes = await doctor.post(`/api/v1/consultations/${consultationId}/lab-orders`).send({ testNames: ["CBC"] });
+    const orderBRes = await doctor
+      .post(`/api/v1/consultations/${consultationId}/lab-orders`)
+      .send({ testNames: ["Urinalysis"] });
+    const orderA = orderARes.body.data.labOrder.id as string;
+    const orderB = orderBRes.body.data.labOrder.id as string;
+    await doctor.post(`/api/v1/consultations/${consultationId}/complete`); // -> WAITING_FOR_LAB
+
+    const { lab } = await startLabAsTech(orderA);
+    await enterAllResults(lab, orderA);
+
+    const blocked = await lab.post(`/api/v1/laboratory/orders/${orderA}/complete`);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe("INCOMPLETE_RESULTS");
+    expect(blocked.body.error.message).toContain("Urinalysis");
+    const afterBlocked = await pool.query("SELECT status FROM laboratory_orders WHERE id = ANY($1::uuid[])", [[orderA, orderB]]);
+    expect(afterBlocked.rows.every((r: { status: string }) => r.status === "REQUESTED")).toBe(true);
+
+    await enterAllResults(lab, orderB);
+    const res = await lab.post(`/api/v1/laboratory/orders/${orderA}/complete`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.order.visitStatus).toBe("LAB_COMPLETED");
+
+    const statuses = await pool.query("SELECT status FROM laboratory_orders WHERE id = ANY($1::uuid[])", [[orderA, orderB]]);
+    expect(statuses.rows.map((r: { status: string }) => r.status)).toEqual(["COMPLETED", "COMPLETED"]);
+  });
+});

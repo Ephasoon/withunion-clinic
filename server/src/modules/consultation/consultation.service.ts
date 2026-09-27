@@ -364,28 +364,36 @@ export async function getDiagnosesForConsultation(consultationId: string): Promi
   }));
 }
 
-async function hasLabOrders(consultationId: string): Promise<boolean> {
-  const result = await pool.query(`SELECT 1 FROM laboratory_orders WHERE consultation_id = $1 LIMIT 1`, [
-    consultationId,
-  ]);
+async function hasOutstandingLabOrders(visitId: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM laboratory_orders WHERE visit_id = $1 AND status = 'REQUESTED' LIMIT 1`,
+    [visitId]
+  );
   return (result.rowCount ?? 0) > 0;
 }
 
-async function hasPrescriptions(consultationId: string): Promise<boolean> {
-  const result = await pool.query(`SELECT 1 FROM prescriptions WHERE consultation_id = $1 LIMIT 1`, [
-    consultationId,
-  ]);
+async function hasPendingPrescriptionItems(visitId: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM prescription_items pi
+     JOIN prescriptions pr ON pr.id = pi.prescription_id
+     WHERE pr.visit_id = $1 AND pi.status = 'PENDING'
+     LIMIT 1`,
+    [visitId]
+  );
   return (result.rowCount ?? 0) > 0;
 }
 
 /**
  * Completes the consultation and advances the visit, choosing the
- * target status from what was actually created in this consultation
- * (Phase 1 §4.1's branching): a lab order takes priority (doctor
- * still needs the result before pharmacy/billing), then a
- * prescription, then straight to billing if neither exists. The
- * transition itself goes through the existing transitionVisit() —
- * this function only decides which target status to request.
+ * target status from everything still outstanding on the VISIT, not
+ * just this consultation (Phase 1 §4.1's branching): an outstanding
+ * lab order takes priority (doctor still needs the result before
+ * pharmacy/billing), then any prescription with undispensed items,
+ * then straight to billing. Visit-wide so a prescription deferred by
+ * an earlier consultation's lab order still reaches pharmacy after a
+ * review consultation that adds nothing new. The transition itself
+ * goes through the existing transitionVisit() — this function only
+ * decides which target status to request.
  *
  * The transition is attempted before completed_at is written, so a
  * visit already in an unexpected state never leaves a consultation
@@ -398,8 +406,8 @@ export async function completeConsultation(
   const consultation = await requireOwnOpenConsultation(consultationId, doctorId);
 
   const [labOrdered, prescribed] = await Promise.all([
-    hasLabOrders(consultationId),
-    hasPrescriptions(consultationId),
+    hasOutstandingLabOrders(consultation.visitId),
+    hasPendingPrescriptionItems(consultation.visitId),
   ]);
 
   const targetStatus = labOrdered ? "WAITING_FOR_LAB" : prescribed ? "WAITING_FOR_PHARMACY" : "WAITING_FOR_BILLING";
