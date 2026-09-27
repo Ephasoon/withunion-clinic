@@ -1,6 +1,7 @@
 import { Router } from "express";
+import helmet from "helmet";
 import { requireAuth, requireRole } from "../../middleware/auth";
-import { getReceipt, renderReceiptHtml } from "./receipts.service";
+import { getReceipt, renderReceiptHtml, PRINT_SCRIPT_CSP_HASH } from "./receipts.service";
 import { AppError } from "../../utils/appError";
 import { ROLES } from "../roles/roles";
 
@@ -29,10 +30,22 @@ receiptsRouter.get(
   }
 );
 
+/**
+ * Route-scoped CSP: helmet's default directives (useDefaults), with
+ * script-src extended by the hash of the page's single inline
+ * window.print() script. Overwrites the app-wide CSP header for this
+ * response only; every other route keeps plain script-src 'self'.
+ */
+const printPageCsp = helmet.contentSecurityPolicy({
+  useDefaults: true,
+  directives: { "script-src": ["'self'", `'${PRINT_SCRIPT_CSP_HASH}'`] },
+});
+
 receiptsRouter.get(
   "/invoices/:invoiceId/print",
   requireAuth,
   requireRole(ROLES.RECEPTION, ROLES.OWNER),
+  printPageCsp,
   async (req, res, next) => {
     try {
       requireUuidParam(req.params.invoiceId, "invoiceId");

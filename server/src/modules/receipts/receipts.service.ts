@@ -1,6 +1,16 @@
+import { createHash } from "crypto";
 import { pool } from "../../config/db";
 import { env } from "../../config/env";
 import { AppError } from "../../utils/appError";
+
+/**
+ * The print page's only script. The app-wide CSP (helmet default,
+ * script-src 'self') blocks inline scripts, so the print route allows
+ * exactly this one via its SHA-256 hash. The hash is derived from the
+ * same string renderReceiptHtml() embeds, so the two cannot drift.
+ */
+const PRINT_SCRIPT = "window.print();";
+export const PRINT_SCRIPT_CSP_HASH = `sha256-${createHash("sha256").update(PRINT_SCRIPT, "utf8").digest("base64")}`;
 
 export interface ReceiptItem {
   description: string;
@@ -218,7 +228,7 @@ export function renderReceiptHtml(receipt: Receipt): string {
   <table>${paymentRows}</table>
   <hr />
   <div class="center">Thank you</div>
-  <script class="no-print">window.print();</script>
+  <script class="no-print">${PRINT_SCRIPT}</script>
 </body>
 </html>`;
 }

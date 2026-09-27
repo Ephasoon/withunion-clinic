@@ -66,7 +66,7 @@ Module endpoints that move a visit call the Visits service, which re-checks lega
 | CORS `origin` | `env.CORS_ORIGIN` — a **single origin string**, default **`http://localhost:5173`** |
 | CORS `credentials` | **`true`** → the frontend must send requests with credentials (`fetch(..., { credentials: "include" })` / `withCredentials`) |
 | JSON body limit | `express.json({ limit: "1mb" })` (nginx example allows 5 MB) |
-| Security headers | `helmet()` defaults on every response. **Verified CSP:** `default-src 'self'; … script-src 'self'; script-src-attr 'none'; style-src 'self' https: 'unsafe-inline'; frame-ancestors 'self'; upgrade-insecure-requests`, plus `X-Frame-Options: SAMEORIGIN` |
+| Security headers | `helmet()` defaults on every response (sole exception: the receipt print route adds one script hash to `script-src`, see §5.11). **Verified CSP:** `default-src 'self'; … script-src 'self'; script-src-attr 'none'; style-src 'self' https: 'unsafe-inline'; frame-ancestors 'self'; upgrade-insecure-requests`, plus `X-Frame-Options: SAMEORIGIN` |
 | CSRF | No CSRF token mechanism exists; protection relies on `SameSite=Lax` + the single-origin CORS policy |
 
 **Session behaviour**
@@ -508,7 +508,7 @@ Shared guard for every write on an existing consultation (`requireOwnOpenConsult
 - **Errors**: `NOT_FOUND` 404 "Invoice not found"; `RECEIPT_NOT_AVAILABLE_UNTIL_PAID` 409 invoice not `PAID`.
 
 #### `GET /api/v1/receipts/invoices/:invoiceId/print` — reception, owner
-- **200** `Content-Type: text/html; charset=utf-8` — **not the JSON envelope**. An 80 mm thermal-receipt page. Dates are formatted server-side with `toLocaleString()` (server locale/timezone). It ends with an inline `<script>window.print();</script>` that **the app's own CSP (`script-src 'self'`) blocks**, so auto-print will not fire.
+- **200** `Content-Type: text/html; charset=utf-8` — **not the JSON envelope**. An 80 mm thermal-receipt page. Dates are formatted server-side with `toLocaleString()` (server locale/timezone). It ends with an inline `<script>window.print();</script>` that auto-opens the print dialog. That script is **explicitly allowed by a hash-based CSP exception scoped to this one route**: the response's CSP is helmet's default policy with `script-src 'self' 'sha256-/rCCQAYo5nH3kqWMvdaSato3ShxLfLrkODJIMZPKHSg='` (the SHA-256 of exactly `window.print();`, derived in `receipts.service.ts` from the same constant the page embeds); every other directive, and every other route's CSP, is unchanged. Open it as a top-level page (e.g. `window.open(url)`) so the session cookie is sent. *Fixed 2026-09-28; before that the app-wide `script-src 'self'` blocked the script and auto-print never fired.*
 - Errors: same as above, returned as **JSON** envelopes.
 
 ### 5.12 Audit log — `modules/audit-log` (owner-only; viewing is not itself audited)

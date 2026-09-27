@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { createHash } from "crypto";
 import request from "supertest";
 import { createApp } from "../src/app";
 import { seedTestUsers, closeTestPool, getUserIdByUsername, TEST_PASSWORD } from "./setup";
@@ -317,5 +318,57 @@ describe("Integration — receipt via Billing's real completion flow (not the ma
     const printRes = await reception.get(`/api/v1/receipts/invoices/${invoiceId}/print`);
     expect(printRes.status).toBe(200);
     expect(printRes.text).toContain("Integration Consultation");
+  });
+});
+
+/** Splits a Content-Security-Policy header into { directiveName: "full directive" }. */
+function parseCsp(header: string): Record<string, string> {
+  const directives: Record<string, string> = {};
+  for (const part of header.split(";").map((p) => p.trim()).filter(Boolean)) {
+    directives[part.split(/\s+/)[0]] = part;
+  }
+  return directives;
+}
+
+describe("Print page CSP", () => {
+  it("allows exactly the page's own inline script, by hash, on the print route", async () => {
+    const { invoiceId } = await createInvoiceFixture();
+    await addItem(invoiceId, "Consultation", 1, 100);
+    await addPayment(invoiceId, 100, "cash");
+    await markInvoicePaid(invoiceId);
+
+    const reception = await loginAs("test.reception");
+    const printRes = await reception.get(`/api/v1/receipts/invoices/${invoiceId}/print`);
+    expect(printRes.status).toBe(200);
+
+    // Hash the script as actually rendered, so this fails if the script
+    // text ever changes without the CSP hash following it.
+    const scripts = [...printRes.text.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    expect(scripts).toHaveLength(1);
+    const expectedHash = `'sha256-${createHash("sha256").update(scripts[0], "utf8").digest("base64")}'`;
+
+    const printCsp = parseCsp(printRes.headers["content-security-policy"]);
+    expect(printCsp["script-src"]).toBe(`script-src 'self' ${expectedHash}`);
+
+    // Every other directive is identical to the app-wide policy.
+    const jsonRes = await reception.get(`/api/v1/receipts/invoices/${invoiceId}`);
+    const jsonCsp = parseCsp(jsonRes.headers["content-security-policy"]);
+    const { "script-src": _printScriptSrc, ...printRest } = printCsp;
+    const { "script-src": _jsonScriptSrc, ...jsonRest } = jsonCsp;
+    expect(printRest).toEqual(jsonRest);
+  });
+
+  it("leaves the JSON receipt route on the app-wide CSP: plain script-src 'self', no hash", async () => {
+    const { invoiceId } = await createInvoiceFixture();
+    await addItem(invoiceId, "Consultation", 1, 100);
+    await addPayment(invoiceId, 100, "cash");
+    await markInvoicePaid(invoiceId);
+
+    const reception = await loginAs("test.reception");
+    const res = await reception.get(`/api/v1/receipts/invoices/${invoiceId}`);
+    expect(res.status).toBe(200);
+    const header = res.headers["content-security-policy"];
+    expect(parseCsp(header)["script-src"]).toBe("script-src 'self'");
+    expect(header).not.toContain("sha256-");
   });
 });
