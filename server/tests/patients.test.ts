@@ -185,3 +185,30 @@ describe("PATCH /api/v1/patients/:id", () => {
     expect(fetchAfter.body.data.patient.patientCode).toBe(originalCode);
   });
 });
+
+
+describe("dateOfBirth round-trips as a plain calendar date", () => {
+  // A DATE column must come back exactly as sent ("YYYY-MM-DD"), not as a
+  // timestamp shifted by the server's timezone. Exact-string checks, so
+  // this holds in any timezone.
+  it("returns the same YYYY-MM-DD string on create, read, and update", async () => {
+    const reception = await loginAs("test.reception");
+    const createRes = await reception
+      .post("/api/v1/patients")
+      .send({ fullName: `DOB Round Trip ${Date.now()}`, gender: "female", dateOfBirth: "1990-05-14" });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.data.patient.dateOfBirth).toBe("1990-05-14");
+    const id = createRes.body.data.patient.id;
+
+    const readRes = await reception.get(`/api/v1/patients/${id}`);
+    expect(readRes.body.data.patient.dateOfBirth).toBe("1990-05-14");
+
+    // A year-boundary date: a timezone shift would land it in the previous year.
+    const patchRes = await reception.patch(`/api/v1/patients/${id}`).send({ dateOfBirth: "1985-01-01" });
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.body.data.patient.dateOfBirth).toBe("1985-01-01");
+
+    const rereadRes = await reception.get(`/api/v1/patients/${id}`);
+    expect(rereadRes.body.data.patient.dateOfBirth).toBe("1985-01-01");
+  });
+});

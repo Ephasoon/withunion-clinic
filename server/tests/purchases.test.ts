@@ -325,3 +325,28 @@ describe("Audit events", () => {
     expect(stockIncrementRows.map((r) => r.entity_id)).toEqual(expect.arrayContaining([itemA, itemB]));
   });
 });
+
+
+describe("purchaseDate round-trips as a plain calendar date", () => {
+  // Same guarantee as Patients' dateOfBirth: the DATE column comes back
+  // exactly as sent, on every endpoint that returns it.
+  it("returns the same YYYY-MM-DD string on create, detail, and list", async () => {
+    const owner = await loginAs("test.owner");
+    const supplierId = await createSupplier(owner);
+    const itemId = await createInventoryItem(owner);
+
+    const createRes = await owner
+      .post("/api/v1/purchases")
+      .send({ supplierId, purchaseDate: "2026-01-01", items: [{ inventoryItemId: itemId, quantity: 1, unitCost: 1 }] });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.data.purchase.purchaseDate).toBe("2026-01-01");
+    const id = createRes.body.data.purchase.id;
+
+    const detailRes = await owner.get(`/api/v1/purchases/${id}`);
+    expect(detailRes.body.data.purchase.purchaseDate).toBe("2026-01-01");
+
+    const listRes = await owner.get("/api/v1/purchases");
+    const listed = listRes.body.data.purchases.find((p: { id: string }) => p.id === id);
+    expect(listed.purchaseDate).toBe("2026-01-01");
+  });
+});

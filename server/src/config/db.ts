@@ -1,5 +1,15 @@
-import { Pool } from "pg";
+import { Pool, types } from "pg";
 import { env } from "./env";
+
+/**
+ * Return DATE columns as the raw "YYYY-MM-DD" string. node-postgres's
+ * default turns a DATE into a JS Date at local midnight, which then
+ * serializes in UTC — e.g. 1990-05-14 becomes "1990-05-13T21:00:00.000Z"
+ * on a UTC+3 server. A calendar date has no time or timezone, so it is
+ * passed through untouched. Process-wide; affects DATE only (not
+ * timestamptz). Must run before any query.
+ */
+types.setTypeParser(types.builtins.DATE, (value: string) => value);
 
 /**
  * Single shared connection pool. All queries go through here so we
