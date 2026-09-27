@@ -44,6 +44,8 @@ npm run dev                # start API with reload
 npm test                   # run auth/RBAC test suite
 ```
 
+`npm test` is a wrapper script (`scripts/run-tests.mjs`) and ignores extra arguments, so `npm test -- <file>` won't target one file — run a single file directly with `npx vitest run tests/<file>.test.ts`.
+
 ## What exists after Phase 2
 
 - Working PostgreSQL schema for: users, roles, sessions, audit_logs
