@@ -151,7 +151,7 @@ Types are the service-layer TypeScript shapes; JSON serialization notes are in s
 AuthUser        { id, fullName, username, role: Role, isActive: boolean }
 User            { id, fullName, username, role: Role, isActive: boolean, createdAt: timestamp, updatedAt: timestamp }
 Patient         { id, patientCode /* "WU-000123" */, fullName, gender: "male"|"female"|"other",
-                  dateOfBirth: DATE-as-timestamp|null /* see 7.3 */, approximateAge: number|null,
+                  dateOfBirth: "YYYY-MM-DD" string|null, approximateAge: number|null,
                   phone: string|null, address: string|null, emergencyContactName: string|null,
                   emergencyContactPhone: string|null, status: "active"|"inactive", notes: string|null,
                   createdBy: uuid, createdAt: timestamp, updatedAt: timestamp }
@@ -198,7 +198,7 @@ AuditLogEntry   { id, user: { id, fullName, username } | null, action, entity, e
                   beforeValue: any|null, afterValue: any|null, ipAddress: string|null, createdAt: timestamp }
 Supplier        { id, name, contactPerson: string|null, phone: string|null, email: string|null, address: string|null,
                   isActive: boolean, createdAt: timestamp, updatedAt: timestamp }
-PurchaseDetail  { id, supplierId, supplierName, purchaseDate: DATE-as-timestamp /* see 7.3 */, referenceNumber: string|null,
+PurchaseDetail  { id, supplierId, supplierName, purchaseDate: "YYYY-MM-DD" string, referenceNumber: string|null,
                   notes: string|null, status: "PENDING"|"RECEIVED", createdBy: uuid, createdAt: timestamp,
                   receivedBy: uuid|null, receivedAt: timestamp|null,
                   items: [{ id, inventoryItemId, inventoryItemName, quantity: number, unitCost: number }] } // item name ASC
@@ -561,7 +561,7 @@ Shared guard for every write on an existing consultation (`requireOwnOpenConsult
 
 ### 5.16 Reports — `modules/reports` (owner-only)
 
-All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY-MM-DD"`, refine `dateFrom <= dateTo` (error on `dateFrom`). Defaults: `dateFrom` = today − 29 days, `dateTo` = today (database date). Ranges are inclusive days. All response dates in reports are plain `"YYYY-MM-DD"` strings (the one module that avoids the DATE issue in 7.3). No route-specific errors beyond the standard ones.
+All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY-MM-DD"`, refine `dateFrom <= dateTo` (error on `dateFrom`). Defaults: `dateFrom` = today − 29 days, `dateTo` = today (database date). Ranges are inclusive days. All response dates in reports are plain `"YYYY-MM-DD"` strings, like every other `DATE` value in the API (§7.3). Reports produces its per-day/per-month buckets with `to_char(...)` in SQL, so those date strings are formatted by PostgreSQL rather than read from a `DATE` column. No route-specific errors beyond the standard ones.
 
 #### `GET /api/v1/reports/visits` — owner
 - Extra query: `status?: VisitStatus`.
