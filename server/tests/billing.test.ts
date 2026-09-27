@@ -81,11 +81,38 @@ describe("Authorization", () => {
     expect(completeRes.status).toBe(403);
   });
 
-  it("any authenticated role can read invoice detail", async () => {
-    const { visitId, doctor } = await createVisitWaitingForBilling();
-    const { invoiceId } = await createInvoiceFor(visitId);
-    const res = await doctor.get(`/api/v1/billing/invoices/${invoiceId}`);
+  it("Reception can read invoice detail", async () => {
+    const { visitId } = await createVisitWaitingForBilling();
+    const { reception, invoiceId } = await createInvoiceFor(visitId);
+    const res = await reception.get(`/api/v1/billing/invoices/${invoiceId}`);
     expect(res.status).toBe(200);
+    expect(res.body.data.invoice.id).toBe(invoiceId);
+  });
+
+  it("Owner can read invoice detail", async () => {
+    const { visitId } = await createVisitWaitingForBilling();
+    const { invoiceId } = await createInvoiceFor(visitId);
+    const owner = await loginAs("test.owner");
+    const res = await owner.get(`/api/v1/billing/invoices/${invoiceId}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.invoice.id).toBe(invoiceId);
+  });
+
+  it("nurse, doctor, lab tech, and pharmacy cannot read invoice detail", async () => {
+    const { visitId } = await createVisitWaitingForBilling();
+    const { invoiceId } = await createInvoiceFor(visitId);
+    for (const username of ["test.nurse", "test.doctor", "test.lab", "test.pharmacy"]) {
+      const agent = await loginAs(username);
+      const res = await agent.get(`/api/v1/billing/invoices/${invoiceId}`);
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it("rejects an unauthenticated request to read invoice detail", async () => {
+    const { visitId } = await createVisitWaitingForBilling();
+    const { invoiceId } = await createInvoiceFor(visitId);
+    const res = await request(app).get(`/api/v1/billing/invoices/${invoiceId}`);
+    expect(res.status).toBe(401);
   });
 
   it("rejects an unauthenticated request", async () => {

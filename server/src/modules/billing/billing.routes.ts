@@ -33,18 +33,23 @@ billingRouter.get("/invoices", requireAuth, requireRole(ROLES.RECEPTION), async 
   }
 });
 
-billingRouter.get("/invoices/:id", requireAuth, async (req, res, next) => {
-  try {
-    requireUuidParam(req.params.id);
-    const invoice = await getInvoiceDetail(req.params.id);
-    if (!invoice) {
-      throw new AppError(404, "NOT_FOUND", "Invoice not found");
+billingRouter.get(
+  "/invoices/:id",
+  requireAuth,
+  requireRole(ROLES.RECEPTION, ROLES.OWNER),
+  async (req, res, next) => {
+    try {
+      requireUuidParam(req.params.id);
+      const invoice = await getInvoiceDetail(req.params.id);
+      if (!invoice) {
+        throw new AppError(404, "NOT_FOUND", "Invoice not found");
+      }
+      res.json({ data: { invoice }, error: null, meta: null });
+    } catch (err) {
+      next(err);
     }
-    res.json({ data: { invoice }, error: null, meta: null });
-  } catch (err) {
-    next(err);
   }
-});
+);
 
 billingRouter.post(
   "/visits/:visitId/invoice",
