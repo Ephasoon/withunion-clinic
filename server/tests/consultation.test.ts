@@ -264,13 +264,22 @@ describe("Re-opening after lab review — multiple consultations per visit", () 
   it("a second consultation can be opened once the visit returns to WITH_DOCTOR after LAB_COMPLETED", async () => {
     const { visitId } = await createVisitWaitingForDoctor();
     const { doctor, consultationId: firstConsultId } = await openConsultationAsDoctor(visitId);
-    await doctor.post(`/api/v1/consultations/${firstConsultId}/lab-orders`).send({ testNames: ["CBC"] });
+    const orderRes = await doctor
+      .post(`/api/v1/consultations/${firstConsultId}/lab-orders`)
+      .send({ testNames: ["CBC"] });
+    const orderId = orderRes.body.data.labOrder.id as string;
     await doctor.post(`/api/v1/consultations/${firstConsultId}/complete`); // -> WAITING_FOR_LAB
 
+    // Real lab round through the Laboratory endpoints -> LAB_COMPLETED.
     const lab = await loginAs("test.lab");
-    await lab.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "AT_LAB" });
-    await lab.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "LAB_COMPLETED" });
+    await lab.post(`/api/v1/laboratory/orders/${orderId}/start`);
+    const orderDetail = await lab.get(`/api/v1/laboratory/orders/${orderId}`);
+    const itemId = orderDetail.body.data.order.items[0].id as string;
+    await lab.post(`/api/v1/laboratory/orders/${orderId}/results`).send({ results: [{ itemId, result: "Normal" }] });
+    const labComplete = await lab.post(`/api/v1/laboratory/orders/${orderId}/complete`);
+    expect(labComplete.body.data.order.visitStatus).toBe("LAB_COMPLETED");
 
+    // The doctor's review pick-up has no module endpoint, so it stays generic.
     const reviewTransition = await doctor
       .post(`/api/v1/visits/${visitId}/transition`)
       .send({ toStatus: "WITH_DOCTOR" });

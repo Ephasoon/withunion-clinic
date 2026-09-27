@@ -1,7 +1,7 @@
 import { Pool, PoolClient } from "pg";
 import { pool, withTransaction } from "../../config/db";
 import { AppError } from "../../utils/appError";
-import { getVisitById, transitionVisitWithClient } from "../visits/visits.service";
+import { completeVisitWithClient, getVisitById } from "../visits/visits.service";
 import { AddInvoiceItemsInput, RecordPaymentInput } from "./billing.schema";
 
 export interface InvoiceItem {
@@ -311,7 +311,7 @@ export async function recordPayment(
  *   4. re-verify the visit is still WAITING_FOR_BILLING;
  *   5. reject (same business error/code as before) if balance != 0;
  *   6. mark the invoice PAID;
- *   7. call transitionVisitWithClient() on this same client, so the
+ *   7. call completeVisitWithClient() on this same client, so the
  *      invoice UPDATE, the visit UPDATE, and the queue_events INSERT
  *      all commit or roll back together.
  * No compensating write exists or is needed: any throw inside this
@@ -343,14 +343,7 @@ export async function completeBilling(
     }
 
     await client.query(`UPDATE invoices SET status = 'PAID' WHERE id = $1`, [invoiceId]);
-    const visit = await transitionVisitWithClient(
-      client,
-      invoiceRow.visit_id,
-      "reception",
-      "COMPLETED",
-      undefined,
-      cashierId
-    );
+    const visit = await completeVisitWithClient(client, invoiceRow.visit_id, "reception", cashierId);
     return visit.status;
   });
 

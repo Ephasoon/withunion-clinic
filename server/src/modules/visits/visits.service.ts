@@ -154,6 +154,28 @@ export async function listTodayVisits(role: Role): Promise<Visit[]> {
 }
 
 /**
+ * Which entry point is asking for a transition. canTransition() only
+ * knows roles, but some moves are owned by a module's own business
+ * flow, and the generic endpoint acts as the same roles:
+ *  - "endpoint": POST /visits/:id/transition — may not reach any
+ *    module-owned status (ENDPOINT_BLOCKED_TARGETS) or COMPLETED;
+ *  - "workflow": a module service that has enforced its own rules
+ *    (Nursing, Consultation, Laboratory, Pharmacy) — anything except
+ *    COMPLETED;
+ *  - "billing": Billing's completion — the only source that may
+ *    reach COMPLETED, and only with a PAID invoice.
+ */
+type TransitionSource = "endpoint" | "workflow" | "billing";
+
+const ENDPOINT_BLOCKED_TARGETS: Partial<Record<VisitStatus, string>> = {
+  WAITING_FOR_LAB: "WAITING_FOR_LAB can only be reached by completing a consultation that has a lab order",
+  LAB_COMPLETED: "LAB_COMPLETED can only be reached by completing laboratory work",
+  WAITING_FOR_PHARMACY: "WAITING_FOR_PHARMACY can only be reached by completing the consultation",
+  WAITING_FOR_BILLING:
+    "WAITING_FOR_BILLING can only be reached by completing the consultation or pharmacy work",
+};
+
+/**
  * Core transition logic, parameterized on an already-open client
  * rather than opening its own transaction. Extracted so a caller that
  * needs the transition to participate in a larger transaction (e.g.
@@ -172,7 +194,7 @@ async function transitionVisitCore(
   toStatus: VisitStatus,
   reason: string | undefined,
   changedBy: string,
-  allowCompletion: boolean
+  source: TransitionSource
 ): Promise<Visit> {
   const visitResult = await client.query<VisitRow>(`${VISIT_SELECT} WHERE v.id = $1`, [visitId]);
   if (!visitResult.rows[0]) {
@@ -192,13 +214,20 @@ async function transitionVisitCore(
     );
   }
 
+  if (source === "endpoint") {
+    const blockedMessage = ENDPOINT_BLOCKED_TARGETS[toStatus];
+    if (blockedMessage) {
+      throw new AppError(403, "FORBIDDEN", blockedMessage);
+    }
+  }
+
   // COMPLETED is owned by Billing's completion flow. canTransition()
   // alone can't enforce that — the generic endpoint and Billing both
   // act as "reception" — so completion additionally requires the
-  // billing entry point (allowCompletion) AND a PAID invoice visible
-  // on this same client (Billing marks it PAID in this transaction).
+  // billing source AND a PAID invoice visible on this same client
+  // (Billing marks it PAID in this transaction).
   if (toStatus === "COMPLETED") {
-    if (!allowCompletion) {
+    if (source !== "billing") {
       throw new AppError(
         403,
         "FORBIDDEN",
@@ -236,11 +265,26 @@ async function transitionVisitCore(
 }
 
 /**
- * Unchanged public API — signature, behavior, atomicity guarantee,
- * and every existing caller (Nursing, Consultation, Laboratory,
- * Pharmacy, the generic /visits/:id/transition route) are unaffected
- * by this refactor. Simply opens its own transaction and delegates
- * to the extracted core.
+ * For the generic POST /visits/:id/transition route only. Opens its
+ * own transaction; refuses every module-owned destination status and
+ * COMPLETED, which are reachable only through their module's flow.
+ */
+export async function transitionVisitFromEndpoint(
+  visitId: string,
+  role: Role,
+  toStatus: VisitStatus,
+  reason: string | undefined,
+  changedBy: string
+): Promise<Visit> {
+  return withTransaction((client: PoolClient) =>
+    transitionVisitCore(client, visitId, role, toStatus, reason, changedBy, "endpoint")
+  );
+}
+
+/**
+ * For module services (Nursing, Consultation, Laboratory, Pharmacy)
+ * that have already enforced their own business rules. Opens its own
+ * transaction. May reach any status except COMPLETED.
  */
 export async function transitionVisit(
   visitId: string,
@@ -250,17 +294,16 @@ export async function transitionVisit(
   changedBy: string
 ): Promise<Visit> {
   return withTransaction((client: PoolClient) =>
-    transitionVisitCore(client, visitId, role, toStatus, reason, changedBy, false)
+    transitionVisitCore(client, visitId, role, toStatus, reason, changedBy, "workflow")
   );
 }
 
 /**
- * For a caller that already holds a PoolClient inside its own
- * withTransaction() block and needs this transition to be part of
- * that same SQL transaction (currently: Billing's completion step).
- * Does not open or close a transaction itself — the caller owns
- * that lifecycle. This is the only entry point permitted to move a
- * visit to COMPLETED, and only once its invoice is PAID.
+ * Same as transitionVisit(), for a module service that already holds
+ * a PoolClient inside its own withTransaction() block and needs the
+ * transition in that same SQL transaction (currently: Laboratory's and
+ * Pharmacy's completion steps). Does not open or close a transaction —
+ * the caller owns that lifecycle. May reach any status except COMPLETED.
  */
 export async function transitionVisitWithClient(
   client: PoolClient,
@@ -270,5 +313,19 @@ export async function transitionVisitWithClient(
   reason: string | undefined,
   changedBy: string
 ): Promise<Visit> {
-  return transitionVisitCore(client, visitId, role, toStatus, reason, changedBy, true);
+  return transitionVisitCore(client, visitId, role, toStatus, reason, changedBy, "workflow");
+}
+
+/**
+ * Billing's completion step only: moves the visit to COMPLETED inside
+ * the caller's transaction, and only once its invoice is PAID on that
+ * same client. The sole entry point permitted to complete a visit.
+ */
+export async function completeVisitWithClient(
+  client: PoolClient,
+  visitId: string,
+  role: Role,
+  changedBy: string
+): Promise<Visit> {
+  return transitionVisitCore(client, visitId, role, "COMPLETED", undefined, changedBy, "billing");
 }
