@@ -196,11 +196,30 @@ describe("Pagination", () => {
   });
 
   it("respects the offset parameter — different pages return different records", async () => {
+    // Pages through a dedicated user's own audit rows, not the global
+    // log: other test files write audit rows concurrently, which shifts
+    // global pages between the two requests. Nothing else writes rows
+    // for this user, so its pages are stable.
     const owner = await loginAs("test.owner");
-    const page1 = await owner.get("/api/v1/audit-logs").query({ limit: 2, offset: 0 });
-    const page2 = await owner.get("/api/v1/audit-logs").query({ limit: 2, offset: 2 });
+    const username = `auditlog.offset.${Date.now()}.${Math.floor(Math.random() * 100000)}`;
+    const userRes = await owner
+      .post("/api/v1/users")
+      .send({ fullName: "Audit Offset User", username, password: TEST_PASSWORD, role: "reception" });
+    const userId = userRes.body.data.user.id as string;
+    // Each successful login writes one login.success row for this user.
+    for (let i = 0; i < 5; i++) {
+      await loginAs(username);
+    }
+
+    const page1 = await owner.get("/api/v1/audit-logs").query({ userId, limit: 2, offset: 0 });
+    const page2 = await owner.get("/api/v1/audit-logs").query({ userId, limit: 2, offset: 2 });
     expect(page1.status).toBe(200);
     expect(page2.status).toBe(200);
+    const logs = [...page1.body.data.logs, ...page2.body.data.logs] as Array<{ id: string; user: { id: string } | null }>;
+    // Both pages are full and belong to this user — so a disjoint result isn't vacuous.
+    expect(page1.body.data.logs).toHaveLength(2);
+    expect(page2.body.data.logs).toHaveLength(2);
+    expect(logs.every((l) => l.user?.id === userId)).toBe(true);
     const ids1 = page1.body.data.logs.map((l: { id: string }) => l.id);
     const ids2 = page2.body.data.logs.map((l: { id: string }) => l.id);
     expect(ids1.some((id: string) => ids2.includes(id))).toBe(false);

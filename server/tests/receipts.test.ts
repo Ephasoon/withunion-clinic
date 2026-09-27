@@ -193,16 +193,33 @@ describe("Repeated retrieval / printing causes no mutation", () => {
     await addPayment(invoiceId, 100, "cash");
     await markInvoicePaid(invoiceId);
 
-    const reception = await loginAs("test.reception");
-    const auditCountBefore = await pool.query("SELECT COUNT(*) FROM audit_logs");
+    // A dedicated reception user, so the audit count below covers only
+    // rows this test's own receipt requests could have written — other
+    // test files write audit rows concurrently, so a whole-table count
+    // drifts. Its login.success row is written before the "before" count.
+    const owner = await loginAs("test.owner");
+    const username = `receipt.nomutation.${Date.now()}.${Math.floor(Math.random() * 100000)}`;
+    const userRes = await owner
+      .post("/api/v1/users")
+      .send({ fullName: "Receipt No-Mutation User", username, password: TEST_PASSWORD, role: "reception" });
+    const userId = userRes.body.data.user.id as string;
+    const reception = await loginAs(username);
+
+    const scopedAuditCount = () =>
+      pool.query("SELECT COUNT(*) FROM audit_logs WHERE user_id = $1 AND entity_id = $2", [userId, invoiceId]);
+    const auditCountBefore = await scopedAuditCount();
     const paymentsCountBefore = await pool.query("SELECT COUNT(*) FROM payments WHERE invoice_id = $1", [invoiceId]);
 
-    await reception.get(`/api/v1/receipts/invoices/${invoiceId}`);
-    await reception.get(`/api/v1/receipts/invoices/${invoiceId}`);
-    await reception.get(`/api/v1/receipts/invoices/${invoiceId}/print`);
-    await reception.get(`/api/v1/receipts/invoices/${invoiceId}/print`);
+    const reads = [
+      await reception.get(`/api/v1/receipts/invoices/${invoiceId}`),
+      await reception.get(`/api/v1/receipts/invoices/${invoiceId}`),
+      await reception.get(`/api/v1/receipts/invoices/${invoiceId}/print`),
+      await reception.get(`/api/v1/receipts/invoices/${invoiceId}/print`),
+    ];
+    // Guard against a vacuous pass: the reads must actually succeed as this user.
+    expect(reads.map((r) => r.status)).toEqual([200, 200, 200, 200]);
 
-    const auditCountAfter = await pool.query("SELECT COUNT(*) FROM audit_logs");
+    const auditCountAfter = await scopedAuditCount();
     const paymentsCountAfter = await pool.query("SELECT COUNT(*) FROM payments WHERE invoice_id = $1", [invoiceId]);
     expect(auditCountAfter.rows[0].count).toBe(auditCountBefore.rows[0].count);
     expect(paymentsCountAfter.rows[0].count).toBe(paymentsCountBefore.rows[0].count);

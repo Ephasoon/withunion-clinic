@@ -209,12 +209,16 @@ describe("Date range resolution", () => {
   });
 
   it("excludes a record one day before dateFrom", async () => {
+    // Fixed dates, not "N days ago": the test database is shared and
+    // never cleaned, so any relative day eventually holds visits from
+    // an earlier full-suite run, and "exactly 0" fails. No test writes
+    // 2001 dates (the empty-range tests use 2020-01-01/02), and this
+    // test's own row lands on 06-14, never on the queried 06-15, so the
+    // count stays 0 however many runs accumulate.
     const owner = await loginAs("test.owner");
-    const dayBefore = daysAgo(11);
-    dayBefore.setUTCHours(12, 0, 0, 0);
-    await createPatientAndVisit("REGISTERED", dayBefore, "excl1");
+    await createPatientAndVisit("REGISTERED", new Date("2001-06-14T12:00:00Z"), "excl1");
 
-    const res = await owner.get("/api/v1/reports/visits").query({ dateFrom: isoDate(daysAgo(10)), dateTo: isoDate(daysAgo(10)) });
+    const res = await owner.get("/api/v1/reports/visits").query({ dateFrom: "2001-06-15", dateTo: "2001-06-15" });
     expect(res.status).toBe(200);
     expect(res.body.data.report.totalCount).toBe(0);
   });
