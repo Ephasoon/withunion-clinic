@@ -39,7 +39,7 @@ export const routes: RouteObject[] = [
           ...featureRoutes.map(
             (route): RouteObject => ({
               element: <RequireRole roles={route.roles} />,
-              children: [{ path: route.path, element: route.element }],
+              children: [{ path: route.path, Component: route.Component }],
             })
           ),
           { path: "*", element: <NotFoundPage /> },
