@@ -2,6 +2,8 @@ import type { ComponentType } from "react";
 import { ConsultationPage } from "../features/doctor/ConsultationPage";
 import { DoctorQueuePage } from "../features/doctor/DoctorQueuePage";
 import { DoctorVisitPage } from "../features/doctor/DoctorVisitPage";
+import { BillingQueuePage } from "../features/billing/BillingQueuePage";
+import { InvoicePage } from "../features/billing/InvoicePage";
 import { InventoryPage } from "../features/inventory/InventoryPage";
 import { LabOrderPage } from "../features/laboratory/LabOrderPage";
 import { PharmacyQueuePage } from "../features/pharmacy/PharmacyQueuePage";
@@ -69,6 +71,11 @@ export const featureRoutes: readonly FeatureRoute[] = [
   { path: "pharmacy/prescriptions/:prescriptionId", roles: [ROLES.PHARMACY, ROLES.OWNER], Component: PrescriptionPage },
   // Inventory: GET /inventory/items is owner/pharmacy; POST is owner-only (the page shows the form to the owner only).
   { path: "inventory", label: "Inventory", roles: [ROLES.PHARMACY, ROLES.OWNER], Component: InventoryPage },
+  // Billing: GET /billing/invoices is reception-only on the backend, so the work queue is reception-only.
+  // GET /billing/invoices/:id, /visits/:id/invoice and the receipts are reception + owner; every write
+  // (create, items, payments, complete) is reception-only, so the owner views.
+  { path: "billing", label: "Billing", roles: [ROLES.RECEPTION], Component: BillingQueuePage },
+  { path: "billing/visits/:visitId", roles: [ROLES.RECEPTION, ROLES.OWNER], Component: InvoicePage },
 ];
 
 export function navItemsFor(user: { role: string } | null): readonly (FeatureRoute & { label: string })[] {

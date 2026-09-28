@@ -22,6 +22,9 @@ describe("featureRoutes — Reception + Visits", () => {
     expect(rolesFor("pharmacy/queue")).toEqual(["pharmacy"]);
     expect(rolesFor("pharmacy/prescriptions/:prescriptionId")).toEqual(["pharmacy", "owner"]);
     expect(rolesFor("inventory")).toEqual(["pharmacy", "owner"]);
+    // GET /billing/invoices is reception-only on the backend, so the owner does not get the work queue.
+    expect(rolesFor("billing")).toEqual(["reception"]);
+    expect(rolesFor("billing/visits/:visitId")).toEqual(["reception", "owner"]);
   });
 
   it("has no duplicate paths", () => {
@@ -32,7 +35,7 @@ describe("featureRoutes — Reception + Visits", () => {
 
 describe("navItemsFor", () => {
   it("lists each role's screens, never detail or form pages", () => {
-    expect(navItemsFor({ role: "reception" }).map((r) => r.path)).toEqual(["visits/today", "patients"]);
+    expect(navItemsFor({ role: "reception" }).map((r) => r.path)).toEqual(["visits/today", "patients", "billing"]);
     expect(navItemsFor({ role: "nurse" }).map((r) => r.path)).toEqual(["nursing/queue"]);
     expect(navItemsFor({ role: "doctor" }).map((r) => r.path)).toEqual(["doctor/queue"]);
     expect(navItemsFor({ role: "lab_tech" }).map((r) => r.path)).toEqual(["laboratory/queue"]);

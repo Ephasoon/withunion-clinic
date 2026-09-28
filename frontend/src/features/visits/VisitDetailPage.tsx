@@ -69,6 +69,15 @@ export function VisitDetailPage() {
         {user && <VisitActionsPanel visit={visit} role={user.role} />}
       </div>
 
+      {(visit.status === "WAITING_FOR_BILLING" || visit.status === "COMPLETED") && (
+        <Link
+          to={`/billing/visits/${visit.id}`}
+          className="inline-block rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+        >
+          {visit.status === "COMPLETED" ? "Invoice and receipt" : "Billing"}
+        </Link>
+      )}
+
       <div className="space-y-3">
         <h2 className="text-base font-semibold text-slate-900">History</h2>
         {history.length === 0 ? (
