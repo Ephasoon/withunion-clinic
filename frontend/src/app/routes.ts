@@ -4,7 +4,13 @@ import { DoctorQueuePage } from "../features/doctor/DoctorQueuePage";
 import { DoctorVisitPage } from "../features/doctor/DoctorVisitPage";
 import { BillingQueuePage } from "../features/billing/BillingQueuePage";
 import { InvoicePage } from "../features/billing/InvoicePage";
+import { DashboardPage } from "../features/dashboard/DashboardPage";
 import { InventoryPage } from "../features/inventory/InventoryPage";
+import { DispensingReportPage } from "../features/reports/DispensingReportPage";
+import { FinancialReportPage } from "../features/reports/FinancialReportPage";
+import { PurchasingReportPage } from "../features/reports/PurchasingReportPage";
+import { ReportsIndexPage } from "../features/reports/ReportsIndexPage";
+import { VisitsReportPage } from "../features/reports/VisitsReportPage";
 import { LabOrderPage } from "../features/laboratory/LabOrderPage";
 import { PharmacyQueuePage } from "../features/pharmacy/PharmacyQueuePage";
 import { PrescriptionPage } from "../features/pharmacy/PrescriptionPage";
@@ -76,6 +82,13 @@ export const featureRoutes: readonly FeatureRoute[] = [
   // (create, items, payments, complete) is reception-only, so the owner views.
   { path: "billing", label: "Billing", roles: [ROLES.RECEPTION], Component: BillingQueuePage },
   { path: "billing/visits/:visitId", roles: [ROLES.RECEPTION, ROLES.OWNER], Component: InvoicePage },
+  // Dashboard and reports: GET /dashboard and GET /reports/* are owner-only (§5.13, §5.16).
+  { path: "dashboard", label: "Dashboard", roles: [ROLES.OWNER], Component: DashboardPage },
+  { path: "reports", label: "Reports", roles: [ROLES.OWNER], Component: ReportsIndexPage },
+  { path: "reports/visits", roles: [ROLES.OWNER], Component: VisitsReportPage },
+  { path: "reports/financial", roles: [ROLES.OWNER], Component: FinancialReportPage },
+  { path: "reports/purchasing", roles: [ROLES.OWNER], Component: PurchasingReportPage },
+  { path: "reports/pharmacy-dispensing", roles: [ROLES.OWNER], Component: DispensingReportPage },
 ];
 
 export function navItemsFor(user: { role: string } | null): readonly (FeatureRoute & { label: string })[] {

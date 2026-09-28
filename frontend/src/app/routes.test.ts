@@ -25,6 +25,16 @@ describe("featureRoutes — Reception + Visits", () => {
     // GET /billing/invoices is reception-only on the backend, so the owner does not get the work queue.
     expect(rolesFor("billing")).toEqual(["reception"]);
     expect(rolesFor("billing/visits/:visitId")).toEqual(["reception", "owner"]);
+    for (const path of [
+      "dashboard",
+      "reports",
+      "reports/visits",
+      "reports/financial",
+      "reports/purchasing",
+      "reports/pharmacy-dispensing",
+    ]) {
+      expect(rolesFor(path), path).toEqual(["owner"]);
+    }
   });
 
   it("has no duplicate paths", () => {
@@ -46,6 +56,8 @@ describe("navItemsFor", () => {
       "nursing/queue",
       "doctor/queue",
       "inventory",
+      "dashboard",
+      "reports",
     ]);
   });
 
