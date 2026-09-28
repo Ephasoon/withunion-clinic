@@ -11,6 +11,9 @@ import { FinancialReportPage } from "../features/reports/FinancialReportPage";
 import { PurchasingReportPage } from "../features/reports/PurchasingReportPage";
 import { ReportsIndexPage } from "../features/reports/ReportsIndexPage";
 import { VisitsReportPage } from "../features/reports/VisitsReportPage";
+import { CreateUserPage } from "../features/users/CreateUserPage";
+import { UserDetailPage } from "../features/users/UserDetailPage";
+import { UsersListPage } from "../features/users/UsersListPage";
 import { LabOrderPage } from "../features/laboratory/LabOrderPage";
 import { PharmacyQueuePage } from "../features/pharmacy/PharmacyQueuePage";
 import { PrescriptionPage } from "../features/pharmacy/PrescriptionPage";
@@ -89,6 +92,10 @@ export const featureRoutes: readonly FeatureRoute[] = [
   { path: "reports/financial", roles: [ROLES.OWNER], Component: FinancialReportPage },
   { path: "reports/purchasing", roles: [ROLES.OWNER], Component: PurchasingReportPage },
   { path: "reports/pharmacy-dispensing", roles: [ROLES.OWNER], Component: DispensingReportPage },
+  // Users: every /users route is owner-only (§5.2).
+  { path: "users", label: "Users", roles: [ROLES.OWNER], Component: UsersListPage },
+  { path: "users/new", roles: [ROLES.OWNER], Component: CreateUserPage },
+  { path: "users/:userId", roles: [ROLES.OWNER], Component: UserDetailPage },
 ];
 
 export function navItemsFor(user: { role: string } | null): readonly (FeatureRoute & { label: string })[] {

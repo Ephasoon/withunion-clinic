@@ -38,7 +38,7 @@ export function decideGuestGuard(state: AuthState): AuthGuardDecision {
  * at home rather than on the previous user's page.
  */
 export function shouldSaveReturnPath(reason: SignOutReason): boolean {
-  return reason !== "logout" && reason !== "logout-failed";
+  return reason !== "logout" && reason !== "logout-failed" && reason !== "password-changed";
 }
 
 export const LOGIN_PATH = "/login";

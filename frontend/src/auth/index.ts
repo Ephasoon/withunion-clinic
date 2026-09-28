@@ -13,7 +13,7 @@ export {
 export { authKeys, meQueryOptions, resetSessionCache } from "./queries";
 export { AuthProvider } from "./AuthProvider";
 export type { SignOutReason } from "./AuthProvider";
-export { useAuth, useAuthSession, useLogin, useLogout, useRetryAuthCheck } from "./useAuth";
+export { useAuth, useAuthSession, useLogin, useLogout, useRetryAuthCheck, useSignOutLocally } from "./useAuth";
 export { RequireAuth } from "./RequireAuth";
 export { GuestOnly } from "./GuestOnly";
 export { LoginPage } from "./LoginPage";

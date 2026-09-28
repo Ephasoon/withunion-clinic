@@ -6,8 +6,9 @@ import { authKeys, resetSessionCache } from "./queries";
 /**
  * Why the user was last signed out — decides the login page notice and whether to return them to their page.
  * "logout-failed": the user signed out, but POST /auth/logout failed, so the session may still be live on the server.
+ * "password-changed": the user reset their own password, which deletes all their sessions server-side.
  */
-export type SignOutReason = "logout" | "logout-failed" | "expired" | null;
+export type SignOutReason = "logout" | "logout-failed" | "expired" | "password-changed" | null;
 
 export interface AuthSessionContextValue {
   signOutReason: SignOutReason;

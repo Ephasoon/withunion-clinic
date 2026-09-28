@@ -34,6 +34,11 @@ export function LoginPage() {
           Your session has ended. Please sign in again.
         </p>
       )}
+      {signOutReason === "password-changed" && !loginMutation.isError && (
+        <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Your password was changed, which signed you out everywhere. Sign in with your new password.
+        </p>
+      )}
       {signOutReason === "logout-failed" && !loginMutation.isError && (
         <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
           You were signed out on this computer. The server could not be reached, so your session there may stay active

@@ -1,7 +1,7 @@
 import { useContext } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { login, logout } from "./authApi";
-import { AuthSessionContext, type AuthSessionContextValue } from "./AuthProvider";
+import { AuthSessionContext, type AuthSessionContextValue, type SignOutReason } from "./AuthProvider";
 import { deriveAuthState, signOutReasonForLogoutError, type AuthState } from "./authState";
 import { authKeys, meQueryOptions, resetSessionCache } from "./queries";
 
@@ -35,20 +35,29 @@ export function useLogin() {
   });
 }
 
-export function useLogout() {
+/**
+ * Ends the session in this browser: records why, and clears the cached
+ * user and every other cached query, so RequireAuth sends the user to
+ * /login. The single local sign-out path — used by logout and by a
+ * self password reset. Because the cached user is cleared first,
+ * AuthProvider's 401 listener does not also treat it as an expiry.
+ */
+export function useSignOutLocally(): (reason: Exclude<SignOutReason, null>) => void {
   const queryClient = useQueryClient();
   const { setSignOutReason } = useAuthSession();
+  return (reason) => {
+    setSignOutReason(reason);
+    resetSessionCache(queryClient, null);
+  };
+}
+
+export function useLogout() {
+  const signOutLocally = useSignOutLocally();
   return useMutation({
     mutationFn: logout,
-    onSuccess: () => {
-      setSignOutReason("logout");
-      resetSessionCache(queryClient, null);
-    },
-    onError: (error) => {
-      // Sign out locally whatever went wrong, so a shared workstation is
-      // never left signed in; the reason tells the login page what happened.
-      setSignOutReason(signOutReasonForLogoutError(error));
-      resetSessionCache(queryClient, null);
-    },
+    onSuccess: () => signOutLocally("logout"),
+    // Sign out locally whatever went wrong, so a shared workstation is
+    // never left signed in; the reason tells the login page what happened.
+    onError: (error) => signOutLocally(signOutReasonForLogoutError(error)),
   });
 }

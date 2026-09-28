@@ -32,6 +32,7 @@ describe("shouldSaveReturnPath", () => {
   it("does not remember the page after a deliberate sign-out, confirmed or not", () => {
     expect(shouldSaveReturnPath("logout")).toBe(false);
     expect(shouldSaveReturnPath("logout-failed")).toBe(false);
+    expect(shouldSaveReturnPath("password-changed")).toBe(false);
   });
 
   it("remembers the page after an expired session or a fresh visit", () => {
