@@ -32,6 +32,12 @@ describe("describeApiError", () => {
     expect(describeApiError(error)).toBe("Patient not found");
   });
 
+  it("INVALID_VISIT_STATE says the visit is no longer at this step", () => {
+    expect(
+      describeApiError(new ApiError(409, "INVALID_VISIT_STATE", "Vitals can only be recorded while the visit is WITH_NURSE"))
+    ).toMatch(/no longer at this step/);
+  });
+
   it("VISIT_TERMINAL, FORBIDDEN and INTERNAL_ERROR have friendly text", () => {
     expect(describeApiError(new ApiError(409, "VISIT_TERMINAL", "Visit is already CANCELLED"))).toMatch(
       /completed or cancelled/

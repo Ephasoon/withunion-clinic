@@ -10,6 +10,8 @@ describe("featureRoutes — Reception + Visits", () => {
     expect(rolesFor("patients/:patientId")).toEqual(["reception", "owner"]);
     expect(rolesFor("visits/today")).toEqual(["reception", "owner"]);
     expect(rolesFor("visits/:visitId")).toEqual(["reception", "owner"]);
+    expect(rolesFor("nursing/queue")).toEqual(["nurse", "owner"]);
+    expect(rolesFor("nursing/visits/:visitId")).toEqual(["nurse", "owner"]);
   });
 
   it("has no duplicate paths", () => {
@@ -19,13 +21,14 @@ describe("featureRoutes — Reception + Visits", () => {
 });
 
 describe("navItemsFor", () => {
-  it("lists the queue and patients for reception and owner, never detail or form pages", () => {
+  it("lists each role's screens, never detail or form pages", () => {
     expect(navItemsFor({ role: "reception" }).map((r) => r.path)).toEqual(["visits/today", "patients"]);
-    expect(navItemsFor({ role: "owner" }).map((r) => r.path)).toEqual(["visits/today", "patients"]);
+    expect(navItemsFor({ role: "nurse" }).map((r) => r.path)).toEqual(["nursing/queue"]);
+    expect(navItemsFor({ role: "owner" }).map((r) => r.path)).toEqual(["visits/today", "patients", "nursing/queue"]);
   });
 
-  it("lists nothing for clinical roles or when signed out", () => {
-    for (const role of ["nurse", "doctor", "lab_tech", "pharmacy"]) expect(navItemsFor({ role })).toEqual([]);
+  it("lists nothing for roles without screens yet, or when signed out", () => {
+    for (const role of ["doctor", "lab_tech", "pharmacy"]) expect(navItemsFor({ role })).toEqual([]);
     expect(navItemsFor(null)).toEqual([]);
   });
 });

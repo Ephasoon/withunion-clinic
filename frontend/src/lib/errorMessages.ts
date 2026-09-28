@@ -24,6 +24,8 @@ export function describeApiError(error: unknown, options: { notFound?: string } 
       return options.notFound ?? error.message;
     case "VISIT_TERMINAL":
       return "This visit is already completed or cancelled, so it can no longer be changed.";
+    case "INVALID_VISIT_STATE":
+      return "This visit is no longer at this step, so this can’t be done now. The page shows its current status.";
     case "FORBIDDEN":
       return "Your role is not allowed to do this. If the visit has moved on, refresh to see its current status.";
     case "UNAUTHENTICATED":
