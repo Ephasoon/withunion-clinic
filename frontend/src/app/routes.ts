@@ -2,6 +2,8 @@ import type { ComponentType } from "react";
 import { ConsultationPage } from "../features/doctor/ConsultationPage";
 import { DoctorQueuePage } from "../features/doctor/DoctorQueuePage";
 import { DoctorVisitPage } from "../features/doctor/DoctorVisitPage";
+import { LabOrderPage } from "../features/laboratory/LabOrderPage";
+import { LabQueuePage } from "../features/laboratory/LabQueuePage";
 import { NurseQueuePage } from "../features/nursing/NurseQueuePage";
 import { NursingVisitPage } from "../features/nursing/NursingVisitPage";
 import { PatientDetailPage } from "../features/patients/PatientDetailPage";
@@ -51,6 +53,11 @@ export const featureRoutes: readonly FeatureRoute[] = [
   { path: "doctor/queue", label: "Doctor queue", roles: [ROLES.DOCTOR, ROLES.OWNER], Component: DoctorQueuePage },
   { path: "doctor/visits/:visitId", roles: [ROLES.DOCTOR, ROLES.OWNER], Component: DoctorVisitPage },
   { path: "doctor/consultations/:consultationId", roles: [ROLES.DOCTOR, ROLES.OWNER], Component: ConsultationPage },
+  // Laboratory: GET /laboratory/orders is lab_tech-only on the backend (the owner would get 403), so the
+  // queue is lab_tech-only here too. GET /laboratory/orders/:id, /visits/:id and /visits/:id/lab-orders are
+  // open to any role, so the owner may view an order; start, results and complete are lab_tech-only.
+  { path: "laboratory/queue", label: "Lab queue", roles: [ROLES.LAB_TECH], Component: LabQueuePage },
+  { path: "laboratory/orders/:orderId", roles: [ROLES.LAB_TECH, ROLES.OWNER], Component: LabOrderPage },
 ];
 
 export function navItemsFor(user: { role: string } | null): readonly (FeatureRoute & { label: string })[] {
