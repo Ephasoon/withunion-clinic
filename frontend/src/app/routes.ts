@@ -2,7 +2,10 @@ import type { ComponentType } from "react";
 import { ConsultationPage } from "../features/doctor/ConsultationPage";
 import { DoctorQueuePage } from "../features/doctor/DoctorQueuePage";
 import { DoctorVisitPage } from "../features/doctor/DoctorVisitPage";
+import { InventoryPage } from "../features/inventory/InventoryPage";
 import { LabOrderPage } from "../features/laboratory/LabOrderPage";
+import { PharmacyQueuePage } from "../features/pharmacy/PharmacyQueuePage";
+import { PrescriptionPage } from "../features/pharmacy/PrescriptionPage";
 import { LabQueuePage } from "../features/laboratory/LabQueuePage";
 import { NurseQueuePage } from "../features/nursing/NurseQueuePage";
 import { NursingVisitPage } from "../features/nursing/NursingVisitPage";
@@ -58,6 +61,14 @@ export const featureRoutes: readonly FeatureRoute[] = [
   // open to any role, so the owner may view an order; start, results and complete are lab_tech-only.
   { path: "laboratory/queue", label: "Lab queue", roles: [ROLES.LAB_TECH], Component: LabQueuePage },
   { path: "laboratory/orders/:orderId", roles: [ROLES.LAB_TECH, ROLES.OWNER], Component: LabOrderPage },
+  // Pharmacy: GET /pharmacy/prescriptions is pharmacy-only on the backend, so the queue is pharmacy-only.
+  // GET /pharmacy/prescriptions/:id is open to any role but shows the real inventoryItemId only to pharmacy and
+  // owner, and GET /inventory/items (needed to pick and name stock) is owner/pharmacy — so the page is
+  // pharmacy + owner. Start, dispense and complete are pharmacy-only; the owner views.
+  { path: "pharmacy/queue", label: "Pharmacy queue", roles: [ROLES.PHARMACY], Component: PharmacyQueuePage },
+  { path: "pharmacy/prescriptions/:prescriptionId", roles: [ROLES.PHARMACY, ROLES.OWNER], Component: PrescriptionPage },
+  // Inventory: GET /inventory/items is owner/pharmacy; POST is owner-only (the page shows the form to the owner only).
+  { path: "inventory", label: "Inventory", roles: [ROLES.PHARMACY, ROLES.OWNER], Component: InventoryPage },
 ];
 
 export function navItemsFor(user: { role: string } | null): readonly (FeatureRoute & { label: string })[] {

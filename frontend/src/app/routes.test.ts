@@ -18,6 +18,10 @@ describe("featureRoutes — Reception + Visits", () => {
     // GET /laboratory/orders is lab_tech-only on the backend, so the owner does not get the queue.
     expect(rolesFor("laboratory/queue")).toEqual(["lab_tech"]);
     expect(rolesFor("laboratory/orders/:orderId")).toEqual(["lab_tech", "owner"]);
+    // GET /pharmacy/prescriptions is pharmacy-only on the backend, so the owner does not get the queue.
+    expect(rolesFor("pharmacy/queue")).toEqual(["pharmacy"]);
+    expect(rolesFor("pharmacy/prescriptions/:prescriptionId")).toEqual(["pharmacy", "owner"]);
+    expect(rolesFor("inventory")).toEqual(["pharmacy", "owner"]);
   });
 
   it("has no duplicate paths", () => {
@@ -32,16 +36,18 @@ describe("navItemsFor", () => {
     expect(navItemsFor({ role: "nurse" }).map((r) => r.path)).toEqual(["nursing/queue"]);
     expect(navItemsFor({ role: "doctor" }).map((r) => r.path)).toEqual(["doctor/queue"]);
     expect(navItemsFor({ role: "lab_tech" }).map((r) => r.path)).toEqual(["laboratory/queue"]);
+    expect(navItemsFor({ role: "pharmacy" }).map((r) => r.path)).toEqual(["pharmacy/queue", "inventory"]);
     expect(navItemsFor({ role: "owner" }).map((r) => r.path)).toEqual([
       "visits/today",
       "patients",
       "nursing/queue",
       "doctor/queue",
+      "inventory",
     ]);
   });
 
-  it("lists nothing for roles without screens yet, or when signed out", () => {
-    for (const role of ["pharmacy"]) expect(navItemsFor({ role })).toEqual([]);
+  it("lists nothing for unknown roles or when signed out", () => {
+    expect(navItemsFor({ role: "admin" })).toEqual([]);
     expect(navItemsFor(null)).toEqual([]);
   });
 });
