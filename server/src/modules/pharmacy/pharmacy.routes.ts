@@ -8,13 +8,21 @@ import {
   startPharmacyWork,
   dispense,
   completePharmacy,
+  listPrescriptionsForVisit,
   PharmacyPrescriptionDetail,
 } from "./pharmacy.service";
 import { AppError } from "../../utils/appError";
 import { recordAudit } from "../../utils/audit";
 import { ROLES, Role } from "../roles/roles";
+import { getVisitById } from "../visits/visits.service";
 
 export const pharmacyRouter = Router();
+
+/**
+ * Visit-scoped read routes, mounted at /api/v1/visits so a visit page
+ * reads everything from one prefix. Read-only; not audited.
+ */
+export const pharmacyVisitReadsRouter = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -193,3 +201,18 @@ pharmacyRouter.post(
     }
   }
 );
+// Every prescription on a visit, oldest first. Open to any authenticated
+// role, with inventoryItemId redacted exactly as GET /prescriptions/:id does.
+pharmacyVisitReadsRouter.get("/:id/prescriptions", requireAuth, async (req, res, next) => {
+  try {
+    requireUuidParam(req.params.id, "visit id");
+    if (!(await getVisitById(req.params.id))) {
+      throw new AppError(404, "NOT_FOUND", "Visit not found");
+    }
+    const role = req.session.user!.role;
+    const prescriptions = (await listPrescriptionsForVisit(req.params.id)).map((p) => redactForRole(p, role));
+    res.json({ data: { prescriptions }, error: null, meta: null });
+  } catch (err) {
+    next(err);
+  }
+});

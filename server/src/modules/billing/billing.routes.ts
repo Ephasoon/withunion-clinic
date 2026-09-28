@@ -9,12 +9,20 @@ import {
   addInvoiceItems,
   recordPayment,
   completeBilling,
+  getInvoiceByVisitId,
 } from "./billing.service";
 import { AppError } from "../../utils/appError";
 import { recordAudit } from "../../utils/audit";
 import { ROLES } from "../roles/roles";
+import { getVisitById } from "../visits/visits.service";
 
 export const billingRouter = Router();
+
+/**
+ * Visit-scoped read routes, mounted at /api/v1/visits so a visit page
+ * reads everything from one prefix. Read-only; not audited.
+ */
+export const billingVisitReadsRouter = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -156,6 +164,26 @@ billingRouter.post(
       });
 
       res.json({ data: { invoice, visitStatus }, error: null, meta: null });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// A visit's invoice, or null if none has been created yet. Reception
+// and owner only — the same restriction as GET /invoices/:id.
+billingVisitReadsRouter.get(
+  "/:id/invoice",
+  requireAuth,
+  requireRole(ROLES.RECEPTION, ROLES.OWNER),
+  async (req, res, next) => {
+    try {
+      requireUuidParam(req.params.id, "visit id");
+      if (!(await getVisitById(req.params.id))) {
+        throw new AppError(404, "NOT_FOUND", "Visit not found");
+      }
+      const invoice = await getInvoiceByVisitId(req.params.id);
+      res.json({ data: { invoice }, error: null, meta: null });
     } catch (err) {
       next(err);
     }

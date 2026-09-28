@@ -364,6 +364,22 @@ export async function getDiagnosesForConsultation(consultationId: string): Promi
   }));
 }
 
+/** Every consultation on a visit, oldest first, each with its diagnoses. */
+export async function listConsultationsForVisit(
+  visitId: string
+): Promise<Array<Consultation & { diagnoses: Diagnosis[] }>> {
+  const result = await pool.query<ConsultationRow>(
+    `SELECT * FROM consultations WHERE visit_id = $1 ORDER BY started_at ASC`,
+    [visitId]
+  );
+  return Promise.all(
+    result.rows.map(async (row) => ({
+      ...toConsultation(row),
+      diagnoses: await getDiagnosesForConsultation(row.id),
+    }))
+  );
+}
+
 async function hasOutstandingLabOrders(visitId: string): Promise<boolean> {
   const result = await pool.query(
     `SELECT 1 FROM laboratory_orders WHERE visit_id = $1 AND status = 'REQUESTED' LIMIT 1`,

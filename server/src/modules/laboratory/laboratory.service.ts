@@ -98,6 +98,15 @@ export async function getLabOrderDetail(orderId: string): Promise<LabOrderDetail
   return toDetail(result.rows[0]);
 }
 
+/** Every lab order on a visit, any status (REQUESTED and COMPLETED), oldest first. */
+export async function listLabOrdersForVisit(visitId: string): Promise<LabOrderDetail[]> {
+  const result = await pool.query<OrderRow>(
+    `${ORDER_SELECT} WHERE lo.visit_id = $1 ORDER BY lo.requested_at ASC`,
+    [visitId]
+  );
+  return Promise.all(result.rows.map(toDetail));
+}
+
 /**
  * A visit can go through the lab more than once (LAB_COMPLETED ->
  * WITH_DOCTOR -> WAITING_FOR_LAB), so the visit's status alone can't

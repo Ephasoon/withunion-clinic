@@ -16,6 +16,7 @@ import {
   createPrescription,
   completeConsultation,
   getDiagnosesForConsultation,
+  listConsultationsForVisit,
 } from "./consultation.service";
 import { AppError } from "../../utils/appError";
 import { recordAudit } from "../../utils/audit";
@@ -76,6 +77,21 @@ consultationRouter.post(
     }
   }
 );
+
+// Every consultation on a visit, oldest first, each with its diagnoses.
+// Read access for any authenticated role, like GET /consultations/:id.
+consultationRouter.get("/visits/:id/consultations", requireAuth, async (req, res, next) => {
+  try {
+    requireUuidParam(req.params.id, "visit id");
+    if (!(await getVisitById(req.params.id))) {
+      throw new AppError(404, "NOT_FOUND", "Visit not found");
+    }
+    const consultations = await listConsultationsForVisit(req.params.id);
+    res.json({ data: { consultations }, error: null, meta: null });
+  } catch (err) {
+    next(err);
+  }
+});
 
 consultationRouter.get("/consultations/:id", requireAuth, async (req, res, next) => {
   try {

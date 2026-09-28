@@ -8,12 +8,20 @@ import {
   startLabWork,
   enterResults,
   completeLabOrder,
+  listLabOrdersForVisit,
 } from "./laboratory.service";
 import { AppError } from "../../utils/appError";
 import { recordAudit } from "../../utils/audit";
 import { ROLES } from "../roles/roles";
+import { getVisitById } from "../visits/visits.service";
 
 export const laboratoryRouter = Router();
+
+/**
+ * Visit-scoped read routes, mounted at /api/v1/visits so a visit page
+ * reads everything from one prefix. Read-only; not audited.
+ */
+export const laboratoryVisitReadsRouter = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -153,3 +161,17 @@ laboratoryRouter.post(
     }
   }
 );
+// Every lab order on a visit (REQUESTED and COMPLETED), oldest first.
+// Read access for any authenticated role, like GET /orders/:id.
+laboratoryVisitReadsRouter.get("/:id/lab-orders", requireAuth, async (req, res, next) => {
+  try {
+    requireUuidParam(req.params.id, "visit id");
+    if (!(await getVisitById(req.params.id))) {
+      throw new AppError(404, "NOT_FOUND", "Visit not found");
+    }
+    const orders = await listLabOrdersForVisit(req.params.id);
+    res.json({ data: { orders }, error: null, meta: null });
+  } catch (err) {
+    next(err);
+  }
+});

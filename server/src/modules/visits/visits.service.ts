@@ -114,6 +114,15 @@ export async function getVisitById(id: string): Promise<Visit | null> {
   return result.rows[0] ? toVisit(result.rows[0]) : null;
 }
 
+/** Every visit for a patient, any status (including COMPLETED/CANCELLED), newest first. */
+export async function listVisitsForPatient(patientId: string): Promise<Visit[]> {
+  const result = await pool.query<VisitRow>(
+    `${VISIT_SELECT} WHERE v.patient_id = $1 ORDER BY v.created_at DESC`,
+    [patientId]
+  );
+  return result.rows.map(toVisit);
+}
+
 export async function getVisitHistory(visitId: string): Promise<QueueEvent[]> {
   const result = await pool.query<QueueEventRow>(
     `SELECT * FROM queue_events WHERE visit_id = $1 ORDER BY changed_at ASC`,

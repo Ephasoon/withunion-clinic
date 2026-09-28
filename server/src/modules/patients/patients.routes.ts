@@ -11,6 +11,7 @@ import { createPatient, searchPatients, getPatientById, updatePatient } from "./
 import { AppError } from "../../utils/appError";
 import { recordAudit } from "../../utils/audit";
 import { ROLES } from "../roles/roles";
+import { listVisitsForPatient } from "../visits/visits.service";
 
 export const patientsRouter = Router();
 
@@ -74,6 +75,22 @@ patientsRouter.get("/:id", requireAuth, async (req, res, next) => {
       throw new AppError(404, "NOT_FOUND", "Patient not found");
     }
     res.json({ data: { patient }, error: null, meta: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A patient's visit history: every visit, any status (including
+// COMPLETED/CANCELLED), newest first. Any authenticated role, like
+// GET /patients/:id and GET /visits/:id.
+patientsRouter.get("/:id/visits", requireAuth, async (req, res, next) => {
+  try {
+    requireUuidParam(req);
+    if (!(await getPatientById(req.params.id))) {
+      throw new AppError(404, "NOT_FOUND", "Patient not found");
+    }
+    const visits = await listVisitsForPatient(req.params.id);
+    res.json({ data: { visits }, error: null, meta: null });
   } catch (err) {
     next(err);
   }

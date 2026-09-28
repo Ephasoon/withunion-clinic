@@ -208,7 +208,7 @@ PurchaseDetail  { id, supplierId, supplierName, purchaseDate: "YYYY-MM-DD" strin
 
 ## 5. Route inventory
 
-62 routes: `GET /health` + 61 under `/api/v1`. Role column: "any" = any authenticated user; "public" = no auth.
+68 routes: `GET /health` + 67 under `/api/v1`. Role column: "any" = any authenticated user; "public" = no auth.
 
 ### 5.0 Health
 
@@ -290,6 +290,12 @@ PurchaseDetail  { id, supplierId, supplierName, purchaseDate: "YYYY-MM-DD" strin
 #### `GET /api/v1/patients/:id` — any
 - **200** `{ data: { patient: Patient } }`. Errors: `NOT_FOUND` 404 "Patient not found". (Inactive patients are returned.)
 
+#### `GET /api/v1/patients/:id/visits` — any
+- The patient's visit history: every visit, **any status including `COMPLETED`/`CANCELLED`**, newest first (`createdAt DESC`). No pagination. Not audited.
+- **200** `{ data: { visits: Visit[] } }` — `[]` if the patient has no visits.
+- Errors: `NOT_FOUND` 404 "Patient not found".
+- Path error message: "Invalid id format".
+
 #### `PATCH /api/v1/patients/:id` — reception
 - **Body** (`UpdatePatientSchema`): every create field optional, plus `status?: "active"|"inactive"`. No refine — an **empty body `{}` is accepted** and returns the unchanged patient. Fields cannot be set to `null` (see 7.6).
 - **200** `{ data: { patient: Patient } }`. Errors: `NOT_FOUND` 404 "Patient not found".
@@ -341,7 +347,11 @@ PurchaseDetail  { id, supplierId, supplierName, purchaseDate: "YYYY-MM-DD" strin
 - **Body** (`RecordNursingAssessmentSchema`): `{ chiefComplaint?: string (trim, ≤2000), assessmentNotes?: string (trim, ≤4000) }`
 - **201** `{ data: { assessment: NursingAssessment, visitStatus: "WAITING_FOR_DOCTOR" } }` — upserts the single assessment for the visit, then moves the visit `WITH_NURSE → WAITING_FOR_DOCTOR`. The upsert and the transition are **not** one transaction.
 - **Errors**: `NOT_FOUND` 404 "Visit not found"; `INVALID_VISIT_STATE` 409 visit not `WITH_NURSE`; race-only errors (1.3).
-- **No read route exists for the nursing assessment** (a service function `getNursingAssessment()` exists but nothing exposes it).
+- Read it back with `GET /visits/:id/nursing-assessment` (below).
+
+#### `GET /api/v1/visits/:id/nursing-assessment` — any
+- **200** `{ data: { assessment: NursingAssessment | null } }` — `null` when the visit exists but no assessment has been recorded yet. Not audited.
+- Errors: `NOT_FOUND` 404 "Visit not found". (Unlike `GET /visits/:id/vitals`, this checks that the visit exists.)
 
 ### 5.6 Consultation — `modules/consultation` (mounted at `/api/v1`)
 
@@ -363,6 +373,11 @@ Shared guard for every write on an existing consultation (`requireOwnOpenConsult
 | `INVALID_VISIT_STATE` | 409 | visit not `WAITING_FOR_DOCTOR` or `WITH_DOCTOR` |
 | `CONSULTATION_ALREADY_OPEN` | 409 | the visit already has an uncompleted consultation (app check, or partial-unique-index race) |
 | race-only | — | section 1.3 |
+
+#### `GET /api/v1/visits/:id/consultations` — any
+- Every consultation on the visit, oldest first (`startedAt ASC`), each with its diagnoses. Not audited.
+- **200** `{ data: { consultations: Array<Consultation & { diagnoses: Diagnosis[] }> } }` — `[]` if none yet. Like `GET /consultations/:id`, it does **not** include lab orders or prescriptions (use the two routes below).
+- Errors: `NOT_FOUND` 404 "Visit not found".
 
 #### `GET /api/v1/consultations/:id` — any
 - **200** `{ data: { consultation: Consultation, diagnoses: Diagnosis[] } }` (diagnoses `createdAt ASC`). **Does not include** lab orders or prescriptions.
@@ -394,6 +409,11 @@ Shared guard for every write on an existing consultation (`requireOwnOpenConsult
 
 #### `GET /api/v1/laboratory/orders/:id` — any
 - **200** `{ data: { order: LabOrderDetail } }`. Errors: `NOT_FOUND` 404 "Laboratory order not found".
+
+#### `GET /api/v1/visits/:id/lab-orders` — any
+- Every lab order on the visit, **all statuses** (`REQUESTED` and `COMPLETED`, i.e. across lab rounds), oldest first (`requestedAt ASC`). Not audited. Defined in the laboratory module; mounted under `/api/v1/visits`.
+- **200** `{ data: { orders: LabOrderDetail[] } }` — `[]` if none.
+- Errors: `NOT_FOUND` 404 "Visit not found".
 
 #### `POST /api/v1/laboratory/orders/:id/start` — lab_tech
 - No body. **200** `{ data: { order: LabOrderDetail } }` (visit now `AT_LAB`).
@@ -434,6 +454,11 @@ Shared guard for every write on an existing consultation (`requireOwnOpenConsult
 #### `GET /api/v1/pharmacy/prescriptions/:id` — any
 - **200** `{ data: { prescription: PharmacyPrescriptionDetail } }` — for roles other than pharmacy/owner, every item's **`inventoryItemId` is `null`** (redacted).
 - Errors: `NOT_FOUND` 404 "Prescription not found".
+
+#### `GET /api/v1/visits/:id/prescriptions` — any
+- Every prescription on the visit, whatever its item statuses, oldest first (`createdAt ASC`). Same redaction as `GET /prescriptions/:id`: for roles other than pharmacy/owner every item's **`inventoryItemId` is `null`**. Not audited. Defined in the pharmacy module; mounted under `/api/v1/visits`.
+- **200** `{ data: { prescriptions: PharmacyPrescriptionDetail[] } }` — `[]` if none.
+- Errors: `NOT_FOUND` 404 "Visit not found".
 
 #### `POST /api/v1/pharmacy/prescriptions/:id/start` — pharmacy
 - No body. **200** `{ data: { prescription: PharmacyPrescriptionDetail } }` (visit now `AT_PHARMACY`).
@@ -480,6 +505,11 @@ Shared guard for every write on an existing consultation (`requireOwnOpenConsult
 
 #### `GET /api/v1/billing/invoices/:id` — reception, owner
 - **200** `{ data: { invoice: InvoiceDetail } }`. Errors: `NOT_FOUND` 404 "Invoice not found".
+
+#### `GET /api/v1/visits/:id/invoice` — reception, owner
+- The visit's invoice (one per visit), whatever its status and the visit's status. Not audited. Defined in the billing module; mounted under `/api/v1/visits`.
+- **200** `{ data: { invoice: InvoiceDetail | null } }` — `null` when the visit exists but no invoice has been created yet.
+- Errors: `NOT_FOUND` 404 "Visit not found". Other roles get the standard 403 `FORBIDDEN`.
 
 #### `POST /api/v1/billing/visits/:visitId/invoice` — reception
 - No body (any body is ignored — **there is no way to set `discount`; it is always 0**). Path error message: "Invalid visit id format".
@@ -632,7 +662,7 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 ### 7.1 Pagination
 - **Only `GET /audit-logs`** is paginated: `limit` (1–100, default 20) + `offset` (default 0); `total`, `limit`, `offset` are returned **inside `data`**, not `meta`.
 - `GET /patients` has `limit` only (1–100, default 20) — no offset, no total.
-- Everything else returns the full list: users, suppliers, purchases (with items), inventory items, lab queue, pharmacy queue, billing work list, today's visits.
+- Everything else returns the full list: users, suppliers, purchases (with items), inventory items, lab queue, pharmacy queue, billing work list, today's visits, and the visit-scoped/patient-scoped lists (`/visits/:id/consultations|lab-orders|prescriptions`, `/patients/:id/visits`).
 
 ### 7.2 Validation error details
 - `details` = `Record<string, string[]>` keyed by field (nested/array paths are keyed by their **top-level** field, e.g. `items`).
@@ -691,10 +721,8 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 - `GET /health` — 503 carries `data` with `error: null`.
 - `POST /api/v1/auth/login` 429 — produced by express-rate-limit (envelope-shaped, no `details`).
 - Unknown route 404 and every 500 — envelope without `details`.
-- Response keys that differ from the entity name: `POST /consultations/:id/lab-orders` → `labOrder`; `GET /laboratory/orders` → `orders`; `GET /billing/invoices` → `work`; nursing assessment and completion routes return a `visitStatus` string alongside the entity.
+- Response keys that differ from the entity name: `POST /consultations/:id/lab-orders` → `labOrder`; `GET /laboratory/orders` and `GET /visits/:id/lab-orders` → `orders`; `GET /billing/invoices` → `work`; nursing assessment and completion routes return a `visitStatus` string alongside the entity.
 
 ### 7.9 Read endpoints the frontend may expect but which do not exist
-- No read of the **nursing assessment**.
-- No list of a visit's **consultations**, **lab orders**, **prescriptions**, or its **invoice** — lab-order and prescription ids are only returned when created or through the lab/pharmacy work queues, and an invoice is only discoverable through the billing work list while the visit is `WAITING_FOR_BILLING`.
-- No visit search/history beyond `/visits/today` (created today only) and `GET /visits/:id` — a visit created yesterday and still in progress does not appear in any queue.
-- No list of a patient's visits.
+- No cross-patient visit search or date-ranged visit list. Visits are reachable through `/visits/today` (created today only), `GET /visits/:id`, and a patient's history (`GET /patients/:id/visits`) — so a visit created yesterday and still in progress does not appear in any **queue**, though it does appear in its patient's history.
+- *Added 2026-09-28 (previously missing):* a visit-detail page can now read the nursing assessment (`GET /visits/:id/nursing-assessment`), consultations with diagnoses (`/visits/:id/consultations`), lab orders (`/visits/:id/lab-orders`), prescriptions (`/visits/:id/prescriptions`) and invoice (`/visits/:id/invoice`), and a patient-history page can list a patient's visits (`GET /patients/:id/visits`).

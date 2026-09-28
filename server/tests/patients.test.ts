@@ -212,3 +212,70 @@ describe("dateOfBirth round-trips as a plain calendar date", () => {
     expect(rereadRes.body.data.patient.dateOfBirth).toBe("1985-01-01");
   });
 });
+
+
+describe("GET /api/v1/patients/:id/visits (visit history)", () => {
+  async function registerPatient() {
+    const reception = await loginAs("test.reception");
+    const res = await reception
+      .post("/api/v1/patients")
+      .send({ fullName: `History Patient ${Date.now()}-${Math.random()}`, gender: "male", approximateAge: 40 });
+    return { reception, patientId: res.body.data.patient.id as string };
+  }
+
+  it("rejects an unauthenticated request", async () => {
+    const res = await request(app).get("/api/v1/patients/00000000-0000-0000-0000-000000000000/visits");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 for a malformed patient id", async () => {
+    const reception = await loginAs("test.reception");
+    const res = await reception.get("/api/v1/patients/not-a-uuid/visits");
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 404 for a well-formed but unknown patient id", async () => {
+    const reception = await loginAs("test.reception");
+    const res = await reception.get("/api/v1/patients/00000000-0000-0000-0000-000000000000/visits");
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("NOT_FOUND");
+    expect(res.body.error.message).toBe("Patient not found");
+  });
+
+  it("returns an empty list for a patient with no visits", async () => {
+    const { reception, patientId } = await registerPatient();
+    const res = await reception.get(`/api/v1/patients/${patientId}/visits`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ visits: [] });
+  });
+
+  it("lists every visit newest first, including CANCELLED and COMPLETED ones, to any role", async () => {
+    const { reception, patientId } = await registerPatient();
+
+    // Oldest: cancelled.
+    const v1 = (await reception.post("/api/v1/visits").send({ patientId })).body.data.visit.id as string;
+    await reception.post(`/api/v1/visits/${v1}/transition`).send({ toStatus: "CANCELLED", reason: "Left early" });
+
+    // Middle: completed through the real consultation + billing flow.
+    const v2 = (await reception.post("/api/v1/visits").send({ patientId })).body.data.visit.id as string;
+    await reception.post(`/api/v1/visits/${v2}/transition`).send({ toStatus: "WAITING_FOR_DOCTOR" });
+    const doctor = await loginAs("test.doctor");
+    const consultRes = await doctor.post(`/api/v1/visits/${v2}/consultations`);
+    await doctor.post(`/api/v1/consultations/${consultRes.body.data.consultation.id}/complete`); // -> WAITING_FOR_BILLING
+    const invRes = await reception.post(`/api/v1/billing/visits/${v2}/invoice`);
+    const completeRes = await reception.post(`/api/v1/billing/invoices/${invRes.body.data.invoice.id}/complete`);
+    expect(completeRes.body.data.visitStatus).toBe("COMPLETED");
+
+    // Newest: still open.
+    const v3 = (await reception.post("/api/v1/visits").send({ patientId })).body.data.visit.id as string;
+
+    const lab = await loginAs("test.lab");
+    const res = await lab.get(`/api/v1/patients/${patientId}/visits`);
+    expect(res.status).toBe(200);
+    const visits = res.body.data.visits;
+    expect(visits.map((v: { id: string }) => v.id)).toEqual([v3, v2, v1]);
+    expect(visits.map((v: { status: string }) => v.status)).toEqual(["REGISTERED", "COMPLETED", "CANCELLED"]);
+    expect(visits.every((v: { patientId: string }) => v.patientId === patientId)).toBe(true);
+  });
+});

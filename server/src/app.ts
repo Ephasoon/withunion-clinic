@@ -15,10 +15,10 @@ import { patientsRouter } from "./modules/patients/patients.routes";
 import { visitsRouter } from "./modules/visits/visits.routes";
 import { nursingRouter } from "./modules/nursing/nursing.routes";
 import { consultationRouter } from "./modules/consultation/consultation.routes";
-import { laboratoryRouter } from "./modules/laboratory/laboratory.routes";
-import { pharmacyRouter } from "./modules/pharmacy/pharmacy.routes";
+import { laboratoryRouter, laboratoryVisitReadsRouter } from "./modules/laboratory/laboratory.routes";
+import { pharmacyRouter, pharmacyVisitReadsRouter } from "./modules/pharmacy/pharmacy.routes";
 import { inventoryRouter } from "./modules/inventory/inventory.routes";
-import { billingRouter } from "./modules/billing/billing.routes";
+import { billingRouter, billingVisitReadsRouter } from "./modules/billing/billing.routes";
 import { auditLogRouter } from "./modules/audit-log/audit-log.routes";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
 import { suppliersRouter } from "./modules/suppliers/suppliers.routes";
@@ -75,6 +75,10 @@ export function createApp(): Express {
   app.use("/api/v1/patients", patientsRouter);
   app.use("/api/v1/visits", visitsRouter);
   app.use("/api/v1/visits", nursingRouter);
+  // Visit-scoped reads owned by other modules (a visit page reads everything from /visits/:id/...).
+  app.use("/api/v1/visits", laboratoryVisitReadsRouter);
+  app.use("/api/v1/visits", pharmacyVisitReadsRouter);
+  app.use("/api/v1/visits", billingVisitReadsRouter);
   app.use("/api/v1", consultationRouter);
   app.use("/api/v1/laboratory", laboratoryRouter);
   app.use("/api/v1/pharmacy", pharmacyRouter);

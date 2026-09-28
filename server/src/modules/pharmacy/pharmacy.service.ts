@@ -117,6 +117,19 @@ export async function getPrescriptionDetail(prescriptionId: string): Promise<Pha
 }
 
 /**
+ * Every prescription on a visit, oldest first. Unredacted — callers
+ * that serve non-pharmacy roles must apply the route layer's
+ * inventoryItemId redaction.
+ */
+export async function listPrescriptionsForVisit(visitId: string): Promise<PharmacyPrescriptionDetail[]> {
+  const result = await pool.query<PrescriptionRow>(
+    `${PRESCRIPTION_SELECT} WHERE pr.visit_id = $1 ORDER BY pr.created_at ASC`,
+    [visitId]
+  );
+  return Promise.all(result.rows.map(toDetail));
+}
+
+/**
  * "Pending/current" pharmacy work — visit still WAITING_FOR_PHARMACY
  * or AT_PHARMACY, mirroring Laboratory's listPendingLabOrders().
  */

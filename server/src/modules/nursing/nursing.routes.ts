@@ -2,10 +2,16 @@ import { Router } from "express";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { RecordVitalsSchema, RecordNursingAssessmentSchema } from "./nursing.schema";
-import { recordVitals, listVitalsForVisit, recordNursingAssessmentAndAdvance } from "./nursing.service";
+import {
+  recordVitals,
+  listVitalsForVisit,
+  recordNursingAssessmentAndAdvance,
+  getNursingAssessment,
+} from "./nursing.service";
 import { AppError } from "../../utils/appError";
 import { recordAudit } from "../../utils/audit";
 import { ROLES } from "../roles/roles";
+import { getVisitById } from "../visits/visits.service";
 
 export const nursingRouter = Router();
 
@@ -50,6 +56,21 @@ nursingRouter.get("/:id/vitals", requireAuth, async (req, res, next) => {
     requireUuidParam(req.params.id, "visit id");
     const vitals = await listVitalsForVisit(req.params.id);
     res.json({ data: { vitals }, error: null, meta: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Read access for any authenticated role, like vitals. null (not 404)
+// when the visit exists but no assessment has been recorded yet.
+nursingRouter.get("/:id/nursing-assessment", requireAuth, async (req, res, next) => {
+  try {
+    requireUuidParam(req.params.id, "visit id");
+    if (!(await getVisitById(req.params.id))) {
+      throw new AppError(404, "NOT_FOUND", "Visit not found");
+    }
+    const assessment = await getNursingAssessment(req.params.id);
+    res.json({ data: { assessment }, error: null, meta: null });
   } catch (err) {
     next(err);
   }
