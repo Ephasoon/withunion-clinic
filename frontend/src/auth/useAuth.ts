@@ -2,7 +2,7 @@ import { useContext } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { login, logout } from "./authApi";
 import { AuthSessionContext, type AuthSessionContextValue } from "./AuthProvider";
-import { deriveAuthState, isSessionExpiredError, type AuthState } from "./authState";
+import { deriveAuthState, signOutReasonForLogoutError, type AuthState } from "./authState";
 import { authKeys, meQueryOptions, resetSessionCache } from "./queries";
 
 /** The current auth state: loading, authenticated (with the user), unauthenticated, or error. */
@@ -45,11 +45,10 @@ export function useLogout() {
       resetSessionCache(queryClient, null);
     },
     onError: (error) => {
-      // The session was already gone server-side: the user is signed out either way.
-      if (isSessionExpiredError(error)) {
-        setSignOutReason("logout");
-        resetSessionCache(queryClient, null);
-      }
+      // Sign out locally whatever went wrong, so a shared workstation is
+      // never left signed in; the reason tells the login page what happened.
+      setSignOutReason(signOutReasonForLogoutError(error));
+      resetSessionCache(queryClient, null);
     },
   });
 }

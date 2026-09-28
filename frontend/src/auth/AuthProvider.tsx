@@ -3,8 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { isSessionExpiredError } from "./authState";
 import { authKeys, resetSessionCache } from "./queries";
 
-/** Why the user was last signed out — decides the login page notice and whether to return them to their page. */
-export type SignOutReason = "logout" | "expired" | null;
+/**
+ * Why the user was last signed out — decides the login page notice and whether to return them to their page.
+ * "logout-failed": the user signed out, but POST /auth/logout failed, so the session may still be live on the server.
+ */
+export type SignOutReason = "logout" | "logout-failed" | "expired" | null;
 
 export interface AuthSessionContextValue {
   signOutReason: SignOutReason;

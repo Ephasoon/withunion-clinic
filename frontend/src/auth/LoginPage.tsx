@@ -34,6 +34,12 @@ export function LoginPage() {
           Your session has ended. Please sign in again.
         </p>
       )}
+      {signOutReason === "logout-failed" && !loginMutation.isError && (
+        <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          You were signed out on this computer. The server could not be reached, so your session there may stay active
+          until it expires.
+        </p>
+      )}
       {loginMutation.isError && (
         <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">
           {loginErrorMessage(loginMutation.error)}

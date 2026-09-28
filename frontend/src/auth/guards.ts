@@ -1,3 +1,4 @@
+import type { SignOutReason } from "./AuthProvider";
 import type { AuthState } from "./authState";
 
 export type AuthGuardDecision = "wait" | "error" | "allow" | "redirect";
@@ -28,6 +29,16 @@ export function decideGuestGuard(state: AuthState): AuthGuardDecision {
     case "unauthenticated":
       return "allow";
   }
+}
+
+/**
+ * Whether RequireAuth should remember the page to return to after the
+ * next sign-in. Not after the user signed out on purpose — whether or
+ * not the server confirmed it — so the next person to sign in starts
+ * at home rather than on the previous user's page.
+ */
+export function shouldSaveReturnPath(reason: SignOutReason): boolean {
+  return reason !== "logout" && reason !== "logout-failed";
 }
 
 export const LOGIN_PATH = "/login";

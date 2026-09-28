@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AuthState } from "./authState";
-import { decideAuthGuard, decideGuestGuard, safeRedirectPath } from "./guards";
+import { decideAuthGuard, decideGuestGuard, safeRedirectPath, shouldSaveReturnPath } from "./guards";
 
 const loading: AuthState = { status: "loading" };
 const error: AuthState = { status: "error", error: new Error("down") };
@@ -25,6 +25,18 @@ describe("decideGuestGuard (login page)", () => {
     expect(decideGuestGuard(error)).toBe("error");
     expect(decideGuestGuard(signedOut)).toBe("allow");
     expect(decideGuestGuard(signedIn)).toBe("redirect");
+  });
+});
+
+describe("shouldSaveReturnPath", () => {
+  it("does not remember the page after a deliberate sign-out, confirmed or not", () => {
+    expect(shouldSaveReturnPath("logout")).toBe(false);
+    expect(shouldSaveReturnPath("logout-failed")).toBe(false);
+  });
+
+  it("remembers the page after an expired session or a fresh visit", () => {
+    expect(shouldSaveReturnPath("expired")).toBe(true);
+    expect(shouldSaveReturnPath(null)).toBe(true);
   });
 });
 

@@ -51,11 +51,6 @@ export function AppLayout() {
             </div>
           )}
         </div>
-        {logoutMutation.isError && (
-          <p role="alert" className="bg-red-50 px-4 py-2 text-center text-sm text-red-800">
-            Sign-out failed — you are still signed in. Check your connection and try again.
-          </p>
-        )}
       </header>
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">

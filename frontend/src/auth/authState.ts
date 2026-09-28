@@ -37,3 +37,14 @@ export function deriveAuthState(query: MeQueryResult): AuthState {
 export function isSessionExpiredError(error: unknown): boolean {
   return isApiError(error) && error.status === 401 && error.code === "UNAUTHENTICATED";
 }
+
+/**
+ * Sign-out reason after POST /auth/logout failed. The user is signed
+ * out locally either way. A 401 UNAUTHENTICATED means the server
+ * session was already gone, so the sign-out is complete ("logout");
+ * any other failure (network, 5xx, …) means the server session may
+ * still be active until it expires ("logout-failed").
+ */
+export function signOutReasonForLogoutError(error: unknown): "logout" | "logout-failed" {
+  return isSessionExpiredError(error) ? "logout" : "logout-failed";
+}
