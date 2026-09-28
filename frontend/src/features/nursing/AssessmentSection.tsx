@@ -16,7 +16,7 @@ import type { NursingAssessment } from "./types";
 type AssessmentQuery = ReturnType<typeof useAssessment>;
 type RecordAssessmentMutation = ReturnType<typeof useRecordAssessment>;
 
-function AssessmentView({ assessment }: { assessment: NursingAssessment }) {
+export function AssessmentView({ assessment }: { assessment: NursingAssessment }) {
   return (
     <dl className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-sm">
       <div>

@@ -1,4 +1,7 @@
 import type { ComponentType } from "react";
+import { ConsultationPage } from "../features/doctor/ConsultationPage";
+import { DoctorQueuePage } from "../features/doctor/DoctorQueuePage";
+import { DoctorVisitPage } from "../features/doctor/DoctorVisitPage";
 import { NurseQueuePage } from "../features/nursing/NurseQueuePage";
 import { NursingVisitPage } from "../features/nursing/NursingVisitPage";
 import { PatientDetailPage } from "../features/patients/PatientDetailPage";
@@ -42,6 +45,12 @@ export const featureRoutes: readonly FeatureRoute[] = [
   // the owner may view.
   { path: "nursing/queue", label: "Nurse queue", roles: [ROLES.NURSE, ROLES.OWNER], Component: NurseQueuePage },
   { path: "nursing/visits/:visitId", roles: [ROLES.NURSE, ROLES.OWNER], Component: NursingVisitPage },
+  // Doctor: GET /visits/today is role-scoped to WAITING_FOR_DOCTOR/WITH_DOCTOR/LAB_COMPLETED for doctors (§3.4).
+  // Every read used here is open to any role; every write (consultations, notes, diagnoses, orders,
+  // prescriptions, completion, LAB_COMPLETED → WITH_DOCTOR) is doctor-only. The owner may view.
+  { path: "doctor/queue", label: "Doctor queue", roles: [ROLES.DOCTOR, ROLES.OWNER], Component: DoctorQueuePage },
+  { path: "doctor/visits/:visitId", roles: [ROLES.DOCTOR, ROLES.OWNER], Component: DoctorVisitPage },
+  { path: "doctor/consultations/:consultationId", roles: [ROLES.DOCTOR, ROLES.OWNER], Component: ConsultationPage },
 ];
 
 export function navItemsFor(user: { role: string } | null): readonly (FeatureRoute & { label: string })[] {

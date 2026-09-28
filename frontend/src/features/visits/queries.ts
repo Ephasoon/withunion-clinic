@@ -20,10 +20,11 @@ export function useTodayVisits() {
   });
 }
 
-export function useVisit(visitId: string) {
+export function useVisit(visitId: string, enabled = true) {
   return useQuery({
     queryKey: visitKeys.detail(visitId),
     queryFn: ({ signal }) => fetchVisit(visitId, signal),
+    enabled,
   });
 }
 
