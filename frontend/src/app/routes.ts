@@ -1,4 +1,6 @@
 import type { ComponentType } from "react";
+import { AuditLogDetailPage } from "../features/auditLog/AuditLogDetailPage";
+import { AuditLogPage } from "../features/auditLog/AuditLogPage";
 import { ConsultationPage } from "../features/doctor/ConsultationPage";
 import { DoctorQueuePage } from "../features/doctor/DoctorQueuePage";
 import { DoctorVisitPage } from "../features/doctor/DoctorVisitPage";
@@ -9,8 +11,14 @@ import { InventoryPage } from "../features/inventory/InventoryPage";
 import { DispensingReportPage } from "../features/reports/DispensingReportPage";
 import { FinancialReportPage } from "../features/reports/FinancialReportPage";
 import { PurchasingReportPage } from "../features/reports/PurchasingReportPage";
+import { CreatePurchasePage } from "../features/purchases/CreatePurchasePage";
+import { PurchaseDetailPage } from "../features/purchases/PurchaseDetailPage";
+import { PurchasesListPage } from "../features/purchases/PurchasesListPage";
 import { ReportsIndexPage } from "../features/reports/ReportsIndexPage";
 import { VisitsReportPage } from "../features/reports/VisitsReportPage";
+import { CreateSupplierPage } from "../features/suppliers/CreateSupplierPage";
+import { SupplierDetailPage } from "../features/suppliers/SupplierDetailPage";
+import { SuppliersListPage } from "../features/suppliers/SuppliersListPage";
 import { CreateUserPage } from "../features/users/CreateUserPage";
 import { UserDetailPage } from "../features/users/UserDetailPage";
 import { UsersListPage } from "../features/users/UsersListPage";
@@ -96,6 +104,16 @@ export const featureRoutes: readonly FeatureRoute[] = [
   { path: "users", label: "Users", roles: [ROLES.OWNER], Component: UsersListPage },
   { path: "users/new", roles: [ROLES.OWNER], Component: CreateUserPage },
   { path: "users/:userId", roles: [ROLES.OWNER], Component: UserDetailPage },
+  // Suppliers and purchases: every /suppliers and /purchases route is owner-only, reads included (§5.14, §5.15).
+  { path: "suppliers", label: "Suppliers", roles: [ROLES.OWNER], Component: SuppliersListPage },
+  { path: "suppliers/new", roles: [ROLES.OWNER], Component: CreateSupplierPage },
+  { path: "suppliers/:supplierId", roles: [ROLES.OWNER], Component: SupplierDetailPage },
+  { path: "purchases", label: "Purchases", roles: [ROLES.OWNER], Component: PurchasesListPage },
+  { path: "purchases/new", roles: [ROLES.OWNER], Component: CreatePurchasePage },
+  { path: "purchases/:purchaseId", roles: [ROLES.OWNER], Component: PurchaseDetailPage },
+  // Audit log: GET /audit-logs and /audit-logs/:id are owner-only and read-only (§5.12).
+  { path: "audit-log", label: "Audit log", roles: [ROLES.OWNER], Component: AuditLogPage },
+  { path: "audit-log/:logId", roles: [ROLES.OWNER], Component: AuditLogDetailPage },
 ];
 
 export function navItemsFor(user: { role: string } | null): readonly (FeatureRoute & { label: string })[] {

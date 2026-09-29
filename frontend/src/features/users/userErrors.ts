@@ -1,5 +1,6 @@
-import { isApiError, validationDetails } from "../../api";
+import { isApiError } from "../../api";
 import { describeApiError } from "../../lib/errorMessages";
+import { fieldErrorsText } from "../../lib/fieldErrors";
 
 const FIELD_LABELS: Record<string, string> = {
   fullName: "Full name",
@@ -38,11 +39,8 @@ function baseMessage(error: unknown, action: UserAction): string {
     case "NOT_FOUND":
       return "This user no longer exists.";
     case "VALIDATION_ERROR": {
-      const details = validationDetails(error) ?? {};
-      const lines = Object.entries(details)
-        .filter(([, messages]) => messages.length > 0)
-        .map(([field, messages]) => `${FIELD_LABELS[field] ?? field}: ${messages.join("; ")}`);
-      if (lines.length > 0) return lines.join(" · ");
+      const fields = fieldErrorsText(error, FIELD_LABELS);
+      if (fields) return fields;
       // PATCH's "at least one field" refine has no path, so it arrives with empty details.
       if (action === "update") return "Change at least one field (name, role or active status) before saving.";
       return "Some of the details entered are not valid. Check the form and try again.";

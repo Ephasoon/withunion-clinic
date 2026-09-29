@@ -47,18 +47,6 @@ export function pharmacyDispensingReportParams(range: DateRange, filters: { stat
   return params;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * The purchasing report's free-text supplier id (there is no supplier
- * picker yet): blank, or a UUID like the backend requires.
- */
-export function validateSupplierId(raw: string): string | null {
-  const value = raw.trim();
-  if (value === "" || UUID.test(value)) return null;
-  return "Enter a supplier id (a UUID), or leave it blank for all suppliers.";
-}
-
 /**
  * The dispensing report counts only items with dispensed_at set, so these
  * status filters can never match anything (docs §5.16).

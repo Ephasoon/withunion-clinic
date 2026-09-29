@@ -14,7 +14,6 @@ import {
   financialReportParams,
   pharmacyDispensingReportParams,
   purchasingReportParams,
-  validateSupplierId,
   visitsReportParams,
 } from "./reportParams";
 
@@ -96,12 +95,6 @@ describe("report query-param builders — unset filters are omitted, not sent em
     expect(apiUrl("/api/v1/reports/financial", financialReportParams(RANGE, { groupBy: "day" }))).toBe(
       "/api/v1/reports/financial?dateFrom=2026-09-01&dateTo=2026-09-28&groupBy=day"
     );
-  });
-
-  it("validates the free-text supplier id", () => {
-    expect(validateSupplierId("")).toBeNull();
-    expect(validateSupplierId(SUPPLIER)).toBeNull();
-    expect(validateSupplierId("acme")).toMatch(/UUID/);
   });
 });
 

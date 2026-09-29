@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { formatMoney } from "../billing/money";
+import { useSuppliers } from "../suppliers/queries";
 import { useReport } from "./queries";
 import { DateRangePicker, inputClass, ReportFrame, ReportResult, SimpleTable, Stat } from "./ReportControls";
-import { purchasingReportParams, validateSupplierId } from "./reportParams";
+import { purchasingReportParams } from "./reportParams";
 import { PURCHASE_STATUSES, type PurchaseStatus } from "./types";
 import { useReportRange } from "./useReportRange";
 
 const STATUS_LABELS: Record<string, string> = { PENDING: "Pending", RECEIVED: "Received" };
 
-/** GET /reports/purchasing — by purchase date. There is no supplier picker yet, so the supplier filter takes an id. */
+/** GET /reports/purchasing — by purchase date. The supplier filter lists every supplier from GET /suppliers, inactive ones included. */
 export function PurchasingReportPage() {
+  const suppliers = useSuppliers();
   const [supplierId, setSupplierId] = useState("");
-  const [supplierError, setSupplierError] = useState<string | null>(null);
   const [status, setStatus] = useState<PurchaseStatus | "">("");
   const { range, updateRange, rangeErrors, applied, run } = useReportRange((r) =>
     purchasingReportParams(r, { supplierId: "", status: "" })
@@ -19,9 +20,7 @@ export function PurchasingReportPage() {
   const report = useReport("purchasing", applied);
 
   const onRun = () => {
-    const error = validateSupplierId(supplierId);
-    setSupplierError(error);
-    run((r) => purchasingReportParams(r, { supplierId, status }), error === null);
+    run((r) => purchasingReportParams(r, { supplierId, status }));
   };
 
   return (
@@ -53,20 +52,31 @@ export function PurchasingReportPage() {
           </div>
           <div>
             <label htmlFor="report-supplierId" className="text-xs font-medium text-slate-600">
-              Supplier id (optional)
+              Supplier
             </label>
-            <input
+            <select
               id="report-supplierId"
               value={supplierId}
-              onChange={(e) => {
-                setSupplierId(e.target.value);
-                setSupplierError(null);
-              }}
-              placeholder="All suppliers"
-              aria-invalid={supplierError ? true : undefined}
+              onChange={(e) => setSupplierId(e.target.value)}
+              disabled={!suppliers.isSuccess}
               className={inputClass}
-            />
-            {supplierError && <p className="mt-0.5 text-xs text-red-700">{supplierError}</p>}
+            >
+              <option value="">{suppliers.isPending ? "Loading suppliers…" : "All suppliers"}</option>
+              {suppliers.data?.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                  {s.isActive ? "" : " (inactive)"}
+                </option>
+              ))}
+            </select>
+            {suppliers.isError && (
+              <p className="mt-0.5 text-xs text-red-700">
+                Couldn’t load suppliers.{" "}
+                <button type="button" onClick={() => void suppliers.refetch()} className="underline">
+                  Try again
+                </button>
+              </p>
+            )}
           </div>
         </>
       }

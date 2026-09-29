@@ -6,7 +6,7 @@ const FIELD_LABELS: Record<string, string> = {
   dateTo: "End date",
   status: "Status",
   groupBy: "Group by",
-  supplierId: "Supplier id",
+  supplierId: "Supplier",
 };
 
 /**

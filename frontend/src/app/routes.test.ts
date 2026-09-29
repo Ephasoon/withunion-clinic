@@ -35,6 +35,14 @@ describe("featureRoutes — Reception + Visits", () => {
       "users",
       "users/new",
       "users/:userId",
+      "suppliers",
+      "suppliers/new",
+      "suppliers/:supplierId",
+      "purchases",
+      "purchases/new",
+      "purchases/:purchaseId",
+      "audit-log",
+      "audit-log/:logId",
     ]) {
       expect(rolesFor(path), path).toEqual(["owner"]);
     }
@@ -62,6 +70,9 @@ describe("navItemsFor", () => {
       "dashboard",
       "reports",
       "users",
+      "suppliers",
+      "purchases",
+      "audit-log",
     ]);
   });
 
