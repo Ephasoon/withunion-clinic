@@ -44,6 +44,22 @@ npm run dev                # start API with reload
 npm test                   # run auth/RBAC test suite
 ```
 
+Tests run against a separate database (`TEST_DATABASE_URL`, which must name a `*_test` database) so they never write into dev data. Locally that database lives on a private, test-only PostgreSQL server on port 5433, run under your own OS account (no admin rights needed). One-time setup:
+
+```bash
+initdb -D ~/pgdata/withunion-test -U postgres -W -A scram-sha-256 -E UTF8
+# then append to ~/pgdata/withunion-test/postgresql.conf:
+#   port = 5433
+#   listen_addresses = 'localhost'
+pg_ctl -D ~/pgdata/withunion-test -l ~/pgdata/withunion-test.log start
+psql -h localhost -p 5433 -U postgres -c "CREATE ROLE withunion LOGIN PASSWORD '<same as TEST_DATABASE_URL>'"
+psql -h localhost -p 5433 -U postgres -c "CREATE DATABASE withunion_clinic_test OWNER withunion"
+```
+
+It is not a system service, so start it before running tests (and after a reboot) with the `pg_ctl ... start` line above; stop it with `pg_ctl -D ~/pgdata/withunion-test stop`.
+
+`npm test` migrates the test database (`npm run migrate:test`) before running the suite. Vitest refuses to start if `TEST_DATABASE_URL` is unset or doesn't end in `_test`.
+
 `npm test` is a wrapper script (`scripts/run-tests.mjs`) and ignores extra arguments, so `npm test -- <file>` won't target one file — run a single file directly with `npx vitest run tests/<file>.test.ts`.
 
 ## What exists after Phase 2

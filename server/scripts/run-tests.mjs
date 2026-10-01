@@ -5,7 +5,7 @@
  *    which other files' concurrent writes throw off;
  *  - users.test.ts temporarily deactivates every other owner account
  *    (including test.owner), so other files' owner logins fail meanwhile.
- * Two passes:
+ * Pass 0 migrates the test database (TEST_DATABASE_URL); then two passes:
  *  1. every other test file, in parallel (as before);
  *  2. those files, one at a time, after pass 1 has finished.
  * Pass 2 ALWAYS runs, even if pass 1 fails, so every run reports both.
@@ -41,6 +41,22 @@ function runPass(label, args) {
   }
   // A null status means the child was killed by a signal — a failure.
   return result.status ?? 1;
+}
+
+// Pass 0: bring the test database's schema up to date. Tests run
+// against TEST_DATABASE_URL (see vitest.config.ts), never the dev DB.
+// node-pg-migrate loads server/.env itself.
+const pgmCli = join(serverDir, "node_modules", "node-pg-migrate", "bin", "node-pg-migrate.js");
+console.log("\n===== Pass 0: migrate test database (TEST_DATABASE_URL) =====\n");
+const migrate = spawnSync(
+  process.execPath,
+  ["--require", "tsx/cjs", pgmCli, "up", "-j", "ts", "--migration-file-language", "ts",
+    "-m", "src/db/migrations", "--database-url-var", "TEST_DATABASE_URL"],
+  { cwd: serverDir, stdio: "inherit" }
+);
+if (migrate.error || migrate.status !== 0) {
+  console.error("run-tests: migrating the test database failed — not running tests.", migrate.error ?? "");
+  process.exit(migrate.status || 1);
 }
 
 const pass1 = runPass(

@@ -1,4 +1,17 @@
+import "dotenv/config";
 import { defineConfig } from "vitest/config";
+
+// Tests create and delete data freely, so they must never touch the dev
+// database. DATABASE_URL is overridden below; the app's own
+// `import "dotenv/config"` never overrides an already-set variable.
+const testDbUrl = process.env.TEST_DATABASE_URL;
+if (!testDbUrl) {
+  throw new Error("TEST_DATABASE_URL is not set — refusing to run tests against the dev database.");
+}
+const testDbName = new URL(testDbUrl).pathname.slice(1);
+if (!testDbName.endsWith("_test")) {
+  throw new Error(`TEST_DATABASE_URL must point at a *_test database (got "${testDbName}").`);
+}
 
 export default defineConfig({
   test: {
@@ -13,6 +26,7 @@ export default defineConfig({
     // single run, so it gets its own generous limit here rather than
     // loosening the production default.
     env: {
+      DATABASE_URL: testDbUrl,
       LOGIN_RATE_LIMIT_MAX: "1000",
     },
   },

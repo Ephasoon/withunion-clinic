@@ -200,7 +200,8 @@ describe("Date range resolution", () => {
     const owner = await loginAs("test.owner");
     const boundaryDay = daysAgo(5);
     const lateInDay = new Date(boundaryDay);
-    lateInDay.setUTCHours(23, 59, 0, 0);
+    // Report days follow clinic time (UTC+3), so 23:59 local is 20:59 UTC.
+    lateInDay.setUTCHours(20, 59, 0, 0);
     await createPatientAndVisit("REGISTERED", lateInDay, "bound1");
 
     const res = await owner.get("/api/v1/reports/visits").query({ dateFrom: isoDate(daysAgo(5)), dateTo: isoDate(daysAgo(5)) });
