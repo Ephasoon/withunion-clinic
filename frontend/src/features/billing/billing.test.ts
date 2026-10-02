@@ -6,6 +6,8 @@ import { allowedBillingActions } from "./billingActions";
 import { billingErrorMessage, writeFailureOutcome } from "./billingErrors";
 import { EMPTY_ITEM_ROW, lineTotalCents, validateInvoiceItems, validatePayment, type ItemRow } from "./invoiceForms";
 import { centsToAmount, isZeroBalance, parseMoneyToCents, toCents } from "./money";
+import { activePriceListItems, fillRowFromPriceListItem, priceListOptionLabel } from "./priceListPick";
+import type { PriceListItem } from "../priceList/types";
 
 describe("money", () => {
   it("parses typed amounts into exact cents", () => {
@@ -177,5 +179,54 @@ describe("billing errors", () => {
     expect(writeFailureOutcome(new ApiError(400, "OVERPAYMENT", "x"))).toBe("not-saved");
     expect(writeFailureOutcome(new ApiError(500, "INTERNAL_ERROR", "x"))).toBe("unknown");
     expect(writeFailureOutcome(new ApiError(0, "NETWORK_ERROR", "x"))).toBe("unknown");
+  });
+});
+
+describe("price list picker on Add charges", () => {
+  const item = (overrides: Partial<PriceListItem>): PriceListItem => ({
+    id: "p1",
+    name: "Consultation",
+    price: 250.5,
+    isActive: true,
+    createdBy: "u1",
+    createdAt: "2026-10-01T08:00:00.000Z",
+    updatedAt: "2026-10-01T08:00:00.000Z",
+    ...overrides,
+  });
+
+  it("offers only active items, keeping the backend's name order", () => {
+    const items = [item({ id: "a", name: "A" }), item({ id: "b", name: "B", isActive: false }), item({ id: "c", name: "C" })];
+    expect(activePriceListItems(items).map((p) => p.id)).toEqual(["a", "c"]);
+  });
+
+  it("labels each option with name and 2-decimal price", () => {
+    expect(priceListOptionLabel(item({ price: 250.5 }))).toMatch(/^Consultation — 250\.50$/);
+  });
+
+  it("fills description and unit price, leaving quantity as entered", () => {
+    const row: ItemRow = { description: "old", quantity: "3", unitPrice: "1" };
+    expect(fillRowFromPriceListItem(row, item({ price: 250.5 }))).toEqual({ description: "Consultation", quantity: "3", unitPrice: "250.50" });
+  });
+
+  it("produces a row validateInvoiceItems accepts with the exact price", () => {
+    for (const price of [0, 0.29, 250.5, 10_000_000]) {
+      const filled = fillRowFromPriceListItem(EMPTY_ITEM_ROW, item({ price }));
+      expect(validateInvoiceItems([filled]), String(price)).toEqual({
+        ok: true,
+        items: [{ description: "Consultation", quantity: 1, unitPrice: price }],
+      });
+    }
+  });
+
+  it("a picked row and a typed row go out together", () => {
+    const picked = fillRowFromPriceListItem({ ...EMPTY_ITEM_ROW, quantity: "2" }, item({}));
+    const typed: ItemRow = { description: "Dressing kit", quantity: "1", unitPrice: "45" };
+    expect(validateInvoiceItems([picked, typed])).toEqual({
+      ok: true,
+      items: [
+        { description: "Consultation", quantity: 2, unitPrice: 250.5 },
+        { description: "Dressing kit", quantity: 1, unitPrice: 45 },
+      ],
+    });
   });
 });

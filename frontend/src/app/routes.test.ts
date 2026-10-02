@@ -41,6 +41,9 @@ describe("featureRoutes — Reception + Visits", () => {
       "purchases",
       "purchases/new",
       "purchases/:purchaseId",
+      "price-list",
+      "price-list/new",
+      "price-list/:itemId",
       "audit-log",
       "audit-log/:logId",
     ]) {
@@ -72,6 +75,7 @@ describe("navItemsFor", () => {
       "users",
       "suppliers",
       "purchases",
+      "price-list",
       "audit-log",
     ]);
   });

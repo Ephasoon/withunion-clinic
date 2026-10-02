@@ -610,9 +610,9 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 - Extra query: `status?: PrescriptionItemStatus`.
 - **200** `{ data: { report: { dateFrom, dateTo, status: string|null, totalItemsDispensed, totalQuantityDispensed, byStatus: [{ status, itemCount, totalQuantityDispensed }], byDate: [{ date, itemCount, totalQuantityDispensed }] } } }` — only items with `dispensed_at` in range, so `PENDING`/`UNAVAILABLE` filters always return zero rows (documented limitation).
 
-### 5.17 Price List — `modules/price-list` (owner-only, including reads)
+### 5.17 Price List — `modules/price-list` (owner-only, except the list, which reception can also read)
 
-#### `GET /api/v1/price-list` — owner — **200** `{ data: { items: PriceListItem[] } }` (all incl. inactive, `name ASC`, no pagination).
+#### `GET /api/v1/price-list` — owner, reception — **200** `{ data: { items: PriceListItem[] } }` (all incl. inactive, `name ASC`, no pagination). Reception reads it to pick charges when billing (same read/write split as Inventory's owner + pharmacy listing); it gets the full list, inactive items and `createdBy` included, so callers filter to `isActive` themselves.
 #### `GET /api/v1/price-list/:id` — owner — **200** `{ data: { item: PriceListItem } }`; `NOT_FOUND` 404 "Price list item not found".
 #### `POST /api/v1/price-list` — owner
 - **Body**: `{ name: string (trim, 1–255), price: number 0–10000000, ≤2 decimals }` — more than 2 decimals is a `VALIDATION_ERROR` on `price` (not rounded, unlike billing/purchases money inputs). `createdBy` = the session user.

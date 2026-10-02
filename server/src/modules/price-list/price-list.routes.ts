@@ -22,9 +22,10 @@ function requireUuidParam(value: string, label = "id") {
   }
 }
 
-// All Price List endpoints are owner-only, including reads — same
-// access rule as Suppliers.
-priceListRouter.get("/", requireAuth, requireRole(ROLES.OWNER), async (_req, res, next) => {
+// Owner + Reception — the listing Reception needs to pick a charge
+// when billing, mirroring Inventory's owner + pharmacy listing. Every
+// other Price List endpoint, including GET /:id, stays owner-only.
+priceListRouter.get("/", requireAuth, requireRole(ROLES.OWNER, ROLES.RECEPTION), async (_req, res, next) => {
   try {
     const items = await listPriceListItems();
     res.json({ data: { items }, error: null, meta: null });

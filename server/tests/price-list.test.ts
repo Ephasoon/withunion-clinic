@@ -32,18 +32,38 @@ describe("Authorization", () => {
     expect((await request(app).patch("/api/v1/price-list/00000000-0000-0000-0000-000000000000")).status).toBe(401);
   });
 
-  it("rejects every non-owner role from every endpoint", async () => {
+  it("rejects every role other than owner/reception from every endpoint", async () => {
     const owner = await loginAs("test.owner");
     const createRes = await owner.post("/api/v1/price-list").send({ name: uniqueName("Auth Test Item"), price: 100 });
     const id = createRes.body.data.item.id;
 
-    for (const username of ["test.reception", "test.nurse", "test.doctor", "test.lab", "test.pharmacy"]) {
+    for (const username of ["test.nurse", "test.doctor", "test.lab", "test.pharmacy"]) {
       const agent = await loginAs(username);
       expect((await agent.get("/api/v1/price-list")).status).toBe(403);
       expect((await agent.get(`/api/v1/price-list/${id}`)).status).toBe(403);
       expect((await agent.post("/api/v1/price-list").send({ name: "x", price: 1 })).status).toBe(403);
       expect((await agent.patch(`/api/v1/price-list/${id}`).send({ name: "x" })).status).toBe(403);
     }
+  });
+
+  it("reception can list items but is rejected from detail, create and update", async () => {
+    const owner = await loginAs("test.owner");
+    const name = uniqueName("Reception Read Test");
+    const createRes = await owner.post("/api/v1/price-list").send({ name, price: 100 });
+    const id = createRes.body.data.item.id;
+
+    const reception = await loginAs("test.reception");
+    const listRes = await reception.get("/api/v1/price-list");
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data.items.some((item: { id: string }) => item.id === id)).toBe(true);
+
+    expect((await reception.get(`/api/v1/price-list/${id}`)).status).toBe(403);
+    expect((await reception.post("/api/v1/price-list").send({ name: uniqueName("X"), price: 1 })).status).toBe(403);
+    expect((await reception.patch(`/api/v1/price-list/${id}`).send({ price: 1 })).status).toBe(403);
+
+    // The rejected writes changed nothing.
+    const after = await owner.get(`/api/v1/price-list/${id}`);
+    expect(after.body.data.item.price).toBe(100);
   });
 
   it("owner can access every endpoint", async () => {

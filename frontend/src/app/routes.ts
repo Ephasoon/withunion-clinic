@@ -14,6 +14,9 @@ import { PurchasingReportPage } from "../features/reports/PurchasingReportPage";
 import { CreatePurchasePage } from "../features/purchases/CreatePurchasePage";
 import { PurchaseDetailPage } from "../features/purchases/PurchaseDetailPage";
 import { PurchasesListPage } from "../features/purchases/PurchasesListPage";
+import { CreatePriceListItemPage } from "../features/priceList/CreatePriceListItemPage";
+import { PriceListItemDetailPage } from "../features/priceList/PriceListItemDetailPage";
+import { PriceListPage } from "../features/priceList/PriceListPage";
 import { ReportsIndexPage } from "../features/reports/ReportsIndexPage";
 import { VisitsReportPage } from "../features/reports/VisitsReportPage";
 import { CreateSupplierPage } from "../features/suppliers/CreateSupplierPage";
@@ -111,6 +114,11 @@ export const featureRoutes: readonly FeatureRoute[] = [
   { path: "purchases", label: "Purchases", roles: [ROLES.OWNER], Component: PurchasesListPage },
   { path: "purchases/new", roles: [ROLES.OWNER], Component: CreatePurchasePage },
   { path: "purchases/:purchaseId", roles: [ROLES.OWNER], Component: PurchaseDetailPage },
+  // Price List: GET /price-list is owner + reception (reception reads it only for Billing's "Add charges"
+  // picker); GET /price-list/:id, POST and PATCH are owner-only (§5.17), so managing it is owner-only.
+  { path: "price-list", label: "Price List", roles: [ROLES.OWNER], Component: PriceListPage },
+  { path: "price-list/new", roles: [ROLES.OWNER], Component: CreatePriceListItemPage },
+  { path: "price-list/:itemId", roles: [ROLES.OWNER], Component: PriceListItemDetailPage },
   // Audit log: GET /audit-logs and /audit-logs/:id are owner-only and read-only (§5.12).
   { path: "audit-log", label: "Audit log", roles: [ROLES.OWNER], Component: AuditLogPage },
   { path: "audit-log/:logId", roles: [ROLES.OWNER], Component: AuditLogDetailPage },

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { usePriceList } from "../priceList/queries";
 import { writeFailureOutcome, billingErrorMessage } from "./billingErrors";
 import {
   DESCRIPTION_MAX,
@@ -12,6 +13,7 @@ import {
   type PaymentErrors,
 } from "./invoiceForms";
 import { centsToAmount, formatMoney } from "./money";
+import { activePriceListItems, fillRowFromPriceListItem, priceListOptionLabel } from "./priceListPick";
 import type { useInvoiceMutations } from "./queries";
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from "./types";
 
@@ -22,15 +24,33 @@ const inputClass =
 const primaryButton =
   "rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50";
 
-/** POST /billing/invoices/:id/items — one or more charges at once. */
+/**
+ * POST /billing/invoices/:id/items — one or more charges at once. Each row
+ * can be filled from an active price-list item (GET /price-list) or typed
+ * in freely; either way it is an ordinary row, validated and sent the same.
+ */
 export function AddItemsForm({ mutation }: { mutation: Mutations["addItems"] }) {
   const [rows, setRows] = useState<ItemRow[]>([EMPTY_ITEM_ROW]);
   const [rowErrors, setRowErrors] = useState<ItemRowErrors[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // The price-list item each row was last filled from ("" = typed in). Cleared when the description or price is edited.
+  const [picked, setPicked] = useState<string[]>([""]);
+  const priceList = usePriceList();
+  const priceListOptions = priceList.isSuccess ? activePriceListItems(priceList.data) : [];
 
   const setField = (index: number, key: keyof ItemRow, value: string) => {
     setRows((rs) => rs.map((r, i) => (i === index ? { ...r, [key]: value } : r)));
     setRowErrors((es) => es.map((e, i) => (i === index ? { ...e, [key]: undefined } : e)));
+    if (key !== "quantity") setPicked((ps) => ps.map((p, i) => (i === index ? "" : p)));
+    setError(null);
+  };
+
+  const pickPriceListItem = (index: number, itemId: string) => {
+    const item = priceListOptions.find((p) => p.id === itemId);
+    setPicked((ps) => ps.map((p, i) => (i === index ? (item ? item.id : "") : p)));
+    if (!item) return;
+    setRows((rs) => rs.map((r, i) => (i === index ? fillRowFromPriceListItem(r, item) : r)));
+    setRowErrors((es) => es.map((e, i) => (i === index ? { ...e, description: undefined, unitPrice: undefined } : e)));
     setError(null);
   };
 
@@ -47,6 +67,7 @@ export function AddItemsForm({ mutation }: { mutation: Mutations["addItems"] }) 
       onSuccess: () => {
         setRows([EMPTY_ITEM_ROW]);
         setRowErrors([]);
+        setPicked([""]);
       },
     });
   };
@@ -56,11 +77,47 @@ export function AddItemsForm({ mutation }: { mutation: Mutations["addItems"] }) 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
       <h3 className="text-sm font-semibold text-slate-900">Add charges</h3>
+      {priceList.isError && (
+        <p className="text-xs text-slate-600">
+          Couldn’t load the price list — charges can still be typed in.{" "}
+          <button type="button" onClick={() => void priceList.refetch()} className="underline">
+            Try again
+          </button>
+        </p>
+      )}
       {rows.map((row, index) => {
         const errors = rowErrors[index] ?? {};
         const line = lineTotalCents(row);
+        const pickedId = priceListOptions.some((p) => p.id === picked[index]) ? picked[index] : "";
         return (
           <div key={index} className="grid gap-2 rounded-md bg-slate-50 p-2 sm:grid-cols-12">
+            <div className="sm:col-span-12">
+              <label htmlFor={`charge-${index}-priceList`} className="text-xs font-medium text-slate-600">
+                From price list (optional)
+              </label>
+              <select
+                id={`charge-${index}-priceList`}
+                value={pickedId}
+                disabled={priceListOptions.length === 0}
+                onChange={(e) => pickPriceListItem(index, e.target.value)}
+                className={inputClass}
+              >
+                <option value="">
+                  {priceList.isPending
+                    ? "Loading price list…"
+                    : priceList.isError
+                      ? "Price list unavailable"
+                      : priceListOptions.length === 0
+                        ? "No price list items"
+                        : "Choose an item, or type the charge below…"}
+                </option>
+                {priceListOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {priceListOptionLabel(p)}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="sm:col-span-6">
               <label htmlFor={`charge-${index}-description`} className="text-xs font-medium text-slate-600">
                 Description
@@ -111,6 +168,7 @@ export function AddItemsForm({ mutation }: { mutation: Mutations["addItems"] }) 
                   onClick={() => {
                     setRows((rs) => rs.filter((_, i) => i !== index));
                     setRowErrors((es) => es.filter((_, i) => i !== index));
+                    setPicked((ps) => ps.filter((_, i) => i !== index));
                   }}
                   className="text-xs text-slate-600 hover:underline"
                 >
@@ -133,7 +191,10 @@ export function AddItemsForm({ mutation }: { mutation: Mutations["addItems"] }) 
         <button
           type="button"
           disabled={rows.length >= INVOICE_ITEMS_MAX}
-          onClick={() => setRows((rs) => [...rs, EMPTY_ITEM_ROW])}
+          onClick={() => {
+            setRows((rs) => [...rs, EMPTY_ITEM_ROW]);
+            setPicked((ps) => [...ps, ""]);
+          }}
           className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
         >
           Add another charge
