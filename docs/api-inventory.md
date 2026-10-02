@@ -202,13 +202,14 @@ PurchaseDetail  { id, supplierId, supplierName, purchaseDate: "YYYY-MM-DD" strin
                   notes: string|null, status: "PENDING"|"RECEIVED", createdBy: uuid, createdAt: timestamp,
                   receivedBy: uuid|null, receivedAt: timestamp|null,
                   items: [{ id, inventoryItemId, inventoryItemName, quantity: number, unitCost: number }] } // item name ASC
+PriceListItem   { id, name, price: number /* 2 dp */, isActive: boolean, createdBy: uuid, createdAt: timestamp, updatedAt: timestamp }
 ```
 
 ---
 
 ## 5. Route inventory
 
-68 routes: `GET /health` + 67 under `/api/v1`. Role column: "any" = any authenticated user; "public" = no auth.
+72 routes: `GET /health` + 71 under `/api/v1`. Role column: "any" = any authenticated user; "public" = no auth.
 
 ### 5.0 Health
 
@@ -609,6 +610,19 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 - Extra query: `status?: PrescriptionItemStatus`.
 - **200** `{ data: { report: { dateFrom, dateTo, status: string|null, totalItemsDispensed, totalQuantityDispensed, byStatus: [{ status, itemCount, totalQuantityDispensed }], byDate: [{ date, itemCount, totalQuantityDispensed }] } } }` — only items with `dispensed_at` in range, so `PENDING`/`UNAVAILABLE` filters always return zero rows (documented limitation).
 
+### 5.17 Price List — `modules/price-list` (owner-only, including reads)
+
+#### `GET /api/v1/price-list` — owner — **200** `{ data: { items: PriceListItem[] } }` (all incl. inactive, `name ASC`, no pagination).
+#### `GET /api/v1/price-list/:id` — owner — **200** `{ data: { item: PriceListItem } }`; `NOT_FOUND` 404 "Price list item not found".
+#### `POST /api/v1/price-list` — owner
+- **Body**: `{ name: string (trim, 1–255), price: number 0–10000000, ≤2 decimals }` — more than 2 decimals is a `VALIDATION_ERROR` on `price` (not rounded, unlike billing/purchases money inputs). `createdBy` = the session user.
+- **201** `{ data: { item: PriceListItem } }`
+- Errors: `PRICE_LIST_ITEM_ALREADY_EXISTS` 409 — case/whitespace-insensitive name match. (A unique-violation race is **not** caught here and would surface as 500.)
+#### `PATCH /api/v1/price-list/:id` — owner
+- **Body**: create fields all optional + `isActive?: boolean`; at least one key (refine without path → `details` `{}`).
+- **200** `{ data: { item: PriceListItem } }`. Errors: `NOT_FOUND` 404 "Price list item not found"; `PRICE_LIST_ITEM_ALREADY_EXISTS` 409 when `name` matches **another** item (re-casing an item's own name is allowed).
+- Audits `price_list_item.update` (before/after); a deactivation (`isActive: false` on an active item) additionally records `price_list_item.deactivate`, as Suppliers does.
+
 ---
 
 ## 6. Error catalog (deduplicated)
@@ -625,7 +639,7 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 | `VALIDATION_ERROR` | 400 | "Invalid id format" / "Invalid visit id format" / "Invalid invoiceId format" | every `*.routes.ts` with a path id | path param not UUID-shaped |
 | `VALIDATION_ERROR` | 400 | "reason is required to cancel a visit" | `visits/visits.service.ts` | cancel without reason |
 | `VALIDATION_ERROR` | 400 | "Unknown role …" | `users/users.service.ts` | role row missing (defensive) |
-| `NOT_FOUND` | 404 | "<Resource> not found" | patients, users, visits, nursing, consultation, laboratory, pharmacy, billing, receipts, audit-log, suppliers, purchases | id well-formed but no row |
+| `NOT_FOUND` | 404 | "<Resource> not found" | patients, users, visits, nursing, consultation, laboratory, pharmacy, billing, receipts, audit-log, suppliers, purchases, price-list | id well-formed but no row |
 | `NOT_FOUND` | 404 | "No route for METHOD /path" (no `details` key) | `middleware/errorHandler.ts` | unmatched route |
 | `INVALID_CREDENTIALS` | 401 | "Invalid username or password" | `auth/auth.routes.ts` | bad username/password or inactive |
 | `RATE_LIMITED` | 429 | "Too many login attempts. Try again later." (no `details` key) | `auth/auth.routes.ts` (express-rate-limit) | login limit exceeded |
@@ -653,6 +667,7 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 | `RECEIPT_NOT_AVAILABLE_UNTIL_PAID` | 409 | "Receipts are only available once the invoice is fully paid (currently OPEN)" | `receipts/receipts.service.ts` | receipt for OPEN invoice |
 | `INVALID_INVENTORY_ITEM` | 400 | "Inventory item X does not exist" | `purchases/purchases.service.ts` | purchase line with unknown item |
 | `PURCHASE_ALREADY_RECEIVED` | 409 | "Purchase is already RECEIVED" | `purchases/purchases.service.ts` | second receive |
+| `PRICE_LIST_ITEM_ALREADY_EXISTS` | 409 | "A price list item named \"x\" already exists" | `price-list/price-list.service.ts` | duplicate normalized name on create, or rename onto another item's name |
 | `INTERNAL_ERROR` | 500 | "Something went wrong. Please try again." (no `details` key) | `middleware/errorHandler.ts` | any non-AppError, **including malformed JSON bodies** |
 
 ---
@@ -662,11 +677,11 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 ### 7.1 Pagination
 - **Only `GET /audit-logs`** is paginated: `limit` (1–100, default 20) + `offset` (default 0); `total`, `limit`, `offset` are returned **inside `data`**, not `meta`.
 - `GET /patients` has `limit` only (1–100, default 20) — no offset, no total.
-- Everything else returns the full list: users, suppliers, purchases (with items), inventory items, lab queue, pharmacy queue, billing work list, today's visits, and the visit-scoped/patient-scoped lists (`/visits/:id/consultations|lab-orders|prescriptions`, `/patients/:id/visits`).
+- Everything else returns the full list: users, suppliers, purchases (with items), price list items, inventory items, lab queue, pharmacy queue, billing work list, today's visits, and the visit-scoped/patient-scoped lists (`/visits/:id/consultations|lab-orders|prescriptions`, `/patients/:id/visits`).
 
 ### 7.2 Validation error details
 - `details` = `Record<string, string[]>` keyed by field (nested/array paths are keyed by their **top-level** field, e.g. `items`).
-- Refines **without** a `path` (Users PATCH "at least one of…", Suppliers PATCH "at least one field") produce `details: {}` — the message is dropped (Zod puts it in `formErrors`, which `validate.ts` does not return). From code reading; not run.
+- Refines **without** a `path` (Users PATCH "at least one of…", Suppliers and Price List PATCH "at least one field") produce `details: {}` — the message is dropped (Zod puts it in `formErrors`, which `validate.ts` does not return). From code reading; not run.
 - Refines **with** a path: Patients create (`dateOfBirth`), Reports (`dateFrom`).
 
 ### 7.3 Dates and times
@@ -684,7 +699,7 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 
 ### 7.5 Money and decimals
 - Stored as `numeric(10,2)` (max 99 999 999.99). API outputs for billing, receipts, dashboard and reports are **JSON numbers rounded to 2 dp**.
-- Inputs are JSON numbers; values with more than 2 decimals are silently rounded by PostgreSQL. `RecordPaymentSchema` allows `amount` up to 100 000 000, above the column maximum.
+- Inputs are JSON numbers; values with more than 2 decimals are silently rounded by PostgreSQL — except Price List `price`, which rejects them with `VALIDATION_ERROR`. `PriceListItem.price` is returned as a JSON number. `RecordPaymentSchema` allows `amount` up to 100 000 000, above the column maximum.
 - Vitals `temperatureCelsius`, `weightKg`, `heightCm` are returned as **strings** (`"37.5"`) or `null` — not numbers.
 - Quantities (`quantity`, `quantityOnHand`, `quantityPrescribed`, `quantityDispensed`) are integers; counts are numbers.
 
@@ -721,7 +736,7 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 - `GET /health` — 503 carries `data` with `error: null`.
 - `POST /api/v1/auth/login` 429 — produced by express-rate-limit (envelope-shaped, no `details`).
 - Unknown route 404 and every 500 — envelope without `details`.
-- Response keys that differ from the entity name: `POST /consultations/:id/lab-orders` → `labOrder`; `GET /laboratory/orders` and `GET /visits/:id/lab-orders` → `orders`; `GET /billing/invoices` → `work`; nursing assessment and completion routes return a `visitStatus` string alongside the entity.
+- Response keys that differ from the entity name: `POST /consultations/:id/lab-orders` → `labOrder`; `GET /laboratory/orders` and `GET /visits/:id/lab-orders` → `orders`; `GET /billing/invoices` → `work`; Price List routes → `items` / `item`; nursing assessment and completion routes return a `visitStatus` string alongside the entity.
 
 ### 7.9 Read endpoints the frontend may expect but which do not exist
 - No cross-patient visit search or date-ranged visit list. Visits are reachable through `/visits/today` (created today only), `GET /visits/:id`, and a patient's history (`GET /patients/:id/visits`) — so a visit created yesterday and still in progress does not appear in any **queue**, though it does appear in its patient's history.
