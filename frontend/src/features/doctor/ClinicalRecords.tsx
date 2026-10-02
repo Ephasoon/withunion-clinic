@@ -53,6 +53,40 @@ export function NursingSummary({ visitId, patientId }: { visitId: string; patien
   );
 }
 
+/** Lab orders as cards: status, every test with its result. Shared by the lists below and Patient history. */
+export function LabOrderCards({ orders }: { orders: LabOrderDetail[] }) {
+  return (
+    <ul className="space-y-3">
+      {orders.map((order) => (
+        <li key={order.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-slate-600">
+              Ordered {formatDateTime(order.requestedAt)} by {order.requestedByName}
+            </span>
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                order.status === "REQUESTED" ? "bg-amber-100 text-amber-900" : "bg-green-100 text-green-900"
+              }`}
+            >
+              {order.status === "REQUESTED" ? "Waiting for results" : "Results complete"}
+            </span>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {order.items.map((item) => (
+              <li key={item.id} className="flex flex-wrap gap-x-2">
+                <span className="font-medium text-slate-900">{item.testName}:</span>
+                <span className={item.result ? "whitespace-pre-wrap text-slate-800" : "text-slate-400"}>
+                  {item.result ?? "no result yet"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function LabOrdersList({
   query,
   filter,
@@ -69,36 +103,7 @@ export function LabOrdersList({
       loadingLabel="Loading lab orders…"
       empty={empty}
     >
-      {(orders) => (
-        <ul className="space-y-3">
-          {orders.map((order) => (
-            <li key={order.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-slate-600">
-                  Ordered {formatDateTime(order.requestedAt)} by {order.requestedByName}
-                </span>
-                <span
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    order.status === "REQUESTED" ? "bg-amber-100 text-amber-900" : "bg-green-100 text-green-900"
-                  }`}
-                >
-                  {order.status === "REQUESTED" ? "Waiting for results" : "Results complete"}
-                </span>
-              </div>
-              <ul className="mt-2 space-y-1">
-                {order.items.map((item) => (
-                  <li key={item.id} className="flex flex-wrap gap-x-2">
-                    <span className="font-medium text-slate-900">{item.testName}:</span>
-                    <span className={item.result ? "whitespace-pre-wrap text-slate-800" : "text-slate-400"}>
-                      {item.result ?? "no result yet"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      )}
+      {(orders) => <LabOrderCards orders={orders} />}
     </QueryList>
   );
 }
@@ -109,6 +114,36 @@ const ITEM_STATUS_LABELS = {
   DISPENSED: "Dispensed",
   UNAVAILABLE: "Unavailable",
 } as const;
+
+/** Prescriptions as cards: every medicine with its details and dispensing status. Shared like LabOrderCards. */
+export function PrescriptionCards({ prescriptions }: { prescriptions: PrescriptionDetail[] }) {
+  return (
+    <ul className="space-y-3">
+      {prescriptions.map((p) => (
+        <li key={p.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+          <p className="text-slate-600">
+            Prescribed {formatDateTime(p.createdAt)} by {p.doctorName}
+          </p>
+          <ul className="mt-2 space-y-1">
+            {p.items.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  <span className="font-medium text-slate-900">{item.medicineName}</span>
+                  <span className="text-slate-600">
+                    {[item.strength, item.dosage, item.frequency, item.duration].filter(Boolean).length > 0 &&
+                      ` — ${[item.strength, item.dosage, item.frequency, item.duration].filter(Boolean).join(", ")}`}
+                    {item.quantityPrescribed !== null && ` · qty ${item.quantityPrescribed}`}
+                  </span>
+                </span>
+                <span className="text-xs text-slate-500">{ITEM_STATUS_LABELS[item.status]}</span>
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function PrescriptionsList({
   query,
@@ -126,32 +161,7 @@ export function PrescriptionsList({
       loadingLabel="Loading prescriptions…"
       empty={empty}
     >
-      {(prescriptions) => (
-        <ul className="space-y-3">
-          {prescriptions.map((p) => (
-            <li key={p.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-              <p className="text-slate-600">
-                Prescribed {formatDateTime(p.createdAt)} by {p.doctorName}
-              </p>
-              <ul className="mt-2 space-y-1">
-                {p.items.map((item) => (
-                  <li key={item.id} className="flex flex-wrap items-center justify-between gap-2">
-                    <span>
-                      <span className="font-medium text-slate-900">{item.medicineName}</span>
-                      <span className="text-slate-600">
-                        {[item.strength, item.dosage, item.frequency, item.duration].filter(Boolean).length > 0 &&
-                          ` — ${[item.strength, item.dosage, item.frequency, item.duration].filter(Boolean).join(", ")}`}
-                        {item.quantityPrescribed !== null && ` · qty ${item.quantityPrescribed}`}
-                      </span>
-                    </span>
-                    <span className="text-xs text-slate-500">{ITEM_STATUS_LABELS[item.status]}</span>
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      )}
+      {(prescriptions) => <PrescriptionCards prescriptions={prescriptions} />}
     </QueryList>
   );
 }

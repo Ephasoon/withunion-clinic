@@ -6,12 +6,16 @@ import {
   UpdatePatientSchema,
   SearchPatientsQuerySchema,
   SearchPatientsQuery,
+  PatientHistoryQuerySchema,
+  PatientHistoryQuery,
 } from "./patients.schema";
 import { createPatient, searchPatients, getPatientById, updatePatient } from "./patients.service";
+import { getPatientHistory } from "./patientHistory.service";
 import { AppError } from "../../utils/appError";
 import { recordAudit } from "../../utils/audit";
 import { ROLES } from "../roles/roles";
 import { listVisitsForPatient } from "../visits/visits.service";
+import { redactForRole } from "../pharmacy/pharmacy.routes";
 
 export const patientsRouter = Router();
 
@@ -95,6 +99,36 @@ patientsRouter.get("/:id/visits", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
+// A patient's full clinical history for the doctor's consultation page:
+// every other visit (excludeVisitId = the current one), newest first,
+// each with its consultations + diagnoses, prescriptions, lab orders +
+// results and vitals. Doctor and owner only — narrower than the
+// per-visit reads it aggregates (/visits/:id/consultations etc.), with
+// prescriptions redacted per role exactly as /visits/:id/prescriptions.
+patientsRouter.get(
+  "/:id/history",
+  requireAuth,
+  requireRole(ROLES.DOCTOR, ROLES.OWNER),
+  validateQuery(PatientHistoryQuerySchema),
+  async (req, res, next) => {
+    try {
+      requireUuidParam(req);
+      if (!(await getPatientById(req.params.id))) {
+        throw new AppError(404, "NOT_FOUND", "Patient not found");
+      }
+      const query = (req as unknown as { validatedQuery: PatientHistoryQuery }).validatedQuery;
+      const role = req.session.user!.role;
+      const visits = (await getPatientHistory(req.params.id, query.excludeVisitId)).map((visit) => ({
+        ...visit,
+        prescriptions: visit.prescriptions.map((p) => redactForRole(p, role)),
+      }));
+      res.json({ data: { visits }, error: null, meta: null });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // Editing demographic/contact fields is reception-only, same as
 // registration — clinical roles never modify patient identity data.

@@ -55,3 +55,12 @@ export const SearchPatientsQuerySchema = z.object({
 });
 
 export type SearchPatientsQuery = z.infer<typeof SearchPatientsQuerySchema>;
+
+/** GET /patients/:id/history — excludeVisitId is the visit being worked on, left out of the history. */
+export const PatientHistoryQuerySchema = z
+  .object({
+    excludeVisitId: z.string().uuid("excludeVisitId must be a valid uuid").optional(),
+  })
+  .strict();
+
+export type PatientHistoryQuery = z.infer<typeof PatientHistoryQuerySchema>;

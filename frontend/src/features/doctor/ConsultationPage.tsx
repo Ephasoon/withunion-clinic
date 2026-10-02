@@ -10,6 +10,7 @@ import { describeCompletionOutcome, previewCompletion } from "./completion";
 import { DiagnosisForm, LabOrderForm, NotesEditor, PrescriptionForm } from "./ConsultationEditors";
 import { canEditConsultation } from "./doctorActions";
 import { completionErrorMessage } from "./doctorErrors";
+import { PatientHistory } from "./PatientHistory";
 import {
   useConsultation,
   useConsultationMutations,
@@ -22,7 +23,8 @@ import {
  * One consultation: notes, diagnoses, lab orders and prescriptions,
  * then completion. The consultation loads first, then its visit, then
  * the visit-scoped records (lab orders and prescriptions are needed for
- * the completion preview, which is visit-wide).
+ * the completion preview, which is visit-wide) and the patient's
+ * history of previous visits.
  */
 export function ConsultationPage() {
   const { consultationId = "" } = useParams();
@@ -200,6 +202,8 @@ export function ConsultationPage() {
       </div>
 
       <NursingSummary visitId={visit.id} patientId={visit.patientId} />
+
+      <PatientHistory patientId={visit.patientId} currentVisitId={visit.id} />
     </section>
   );
 }

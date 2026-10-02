@@ -1,4 +1,5 @@
-import type { VisitStatus } from "../visits/types";
+import type { VitalSigns, VitalSignsResponse } from "../nursing/types";
+import type { Visit, VisitStatus } from "../visits/types";
 
 /** docs/api-inventory.md §4 and §5.6–5.8. */
 
@@ -94,3 +95,14 @@ export interface PrescriptionItemBody {
 
 /** The only statuses POST /consultations/:id/complete moves a visit to (docs §5.6). */
 export type CompletionStatus = "WAITING_FOR_LAB" | "WAITING_FOR_PHARMACY" | "WAITING_FOR_BILLING";
+
+/** GET /patients/:id/history visits as the API returns them (vitals NUMERIC fields still strings). */
+export type PatientHistoryVisitResponse = Visit & {
+  consultations: ConsultationWithDiagnoses[];
+  prescriptions: PrescriptionDetail[];
+  labOrders: LabOrderDetail[];
+  vitals: VitalSignsResponse[];
+};
+
+/** A past visit with its full clinical record (docs §4 PatientHistoryVisit), vitals converted to numbers. */
+export type PatientHistoryVisit = Omit<PatientHistoryVisitResponse, "vitals"> & { vitals: VitalSigns[] };

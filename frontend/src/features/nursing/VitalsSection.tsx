@@ -17,7 +17,7 @@ import {
 
 const cell = (value: string | null) => value ?? <span className="text-slate-400">—</span>;
 
-function VitalsTable({ vitals }: { vitals: VitalSigns[] }) {
+export function VitalsTable({ vitals }: { vitals: VitalSigns[] }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
       <table className="min-w-full divide-y divide-slate-200 text-sm">

@@ -7,6 +7,7 @@ import {
   createLabOrder,
   createPrescription,
   fetchConsultation,
+  fetchPatientHistory,
   fetchVisitConsultations,
   fetchVisitLabOrders,
   fetchVisitPrescriptions,
@@ -23,6 +24,8 @@ export const doctorKeys = {
   visitConsultations: (visitId: string) => ["doctor", "visit", visitId, "consultations"] as const,
   visitLabOrders: (visitId: string) => ["doctor", "visit", visitId, "lab-orders"] as const,
   visitPrescriptions: (visitId: string) => ["doctor", "visit", visitId, "prescriptions"] as const,
+  patientHistory: (patientId: string, excludeVisitId: string) =>
+    ["doctor", "patient-history", patientId, { excludeVisitId }] as const,
 };
 
 /** Visit-scoped reads. Enable only once GET /visits/:id has succeeded (load the visit first). */
@@ -46,6 +49,19 @@ export function useVisitPrescriptions(visitId: string, enabled: boolean) {
   return useQuery({
     queryKey: doctorKeys.visitPrescriptions(visitId),
     queryFn: ({ signal }) => fetchVisitPrescriptions(visitId, signal),
+    enabled,
+  });
+}
+
+/**
+ * The patient's other visits with their full records (GET /patients/:id/history).
+ * Past visits don't change while this consultation is worked on, so no
+ * doctor action invalidates it; it refetches on the usual focus/stale rules.
+ */
+export function usePatientHistory(patientId: string, excludeVisitId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: doctorKeys.patientHistory(patientId, excludeVisitId),
+    queryFn: ({ signal }) => fetchPatientHistory(patientId, excludeVisitId, signal),
     enabled,
   });
 }

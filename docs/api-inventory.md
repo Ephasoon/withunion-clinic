@@ -203,13 +203,18 @@ PurchaseDetail  { id, supplierId, supplierName, purchaseDate: "YYYY-MM-DD" strin
                   receivedBy: uuid|null, receivedAt: timestamp|null,
                   items: [{ id, inventoryItemId, inventoryItemName, quantity: number, unitCost: number }] } // item name ASC
 PriceListItem   { id, name, price: number /* 2 dp */, isActive: boolean, createdBy: uuid, createdAt: timestamp, updatedAt: timestamp }
+PatientHistoryVisit = Visit & {
+                  consultations: Array<Consultation & { diagnoses: Diagnosis[] }>,  // startedAt ASC
+                  prescriptions: PharmacyPrescriptionDetail[],                    // createdAt ASC, inventoryItemId redacted per role
+                  labOrders: LabOrderDetail[],                                    // requestedAt ASC
+                  vitals: VitalSigns[] }                                          // recordedAt ASC
 ```
 
 ---
 
 ## 5. Route inventory
 
-72 routes: `GET /health` + 71 under `/api/v1`. Role column: "any" = any authenticated user; "public" = no auth.
+73 routes: `GET /health` + 72 under `/api/v1`. Role column: "any" = any authenticated user; "public" = no auth.
 
 ### 5.0 Health
 
@@ -295,6 +300,13 @@ PriceListItem   { id, name, price: number /* 2 dp */, isActive: boolean, created
 - The patient's visit history: every visit, **any status including `COMPLETED`/`CANCELLED`**, newest first (`createdAt DESC`). No pagination. Not audited.
 - **200** `{ data: { visits: Visit[] } }` — `[]` if the patient has no visits.
 - Errors: `NOT_FOUND` 404 "Patient not found".
+- Path error message: "Invalid id format".
+
+#### `GET /api/v1/patients/:id/history` — doctor, owner
+- The patient's clinical history, for the doctor's consultation page. **Query** (`PatientHistoryQuerySchema`, strict): `excludeVisitId?: uuid` — the visit being worked on, left out. An id that isn't one of this patient's visits excludes nothing; omitted, every visit is returned.
+- **200** `{ data: { visits: PatientHistoryVisit[] } }` — every other visit, **any status** (like `/patients/:id/visits`), newest first (`createdAt DESC`), each filled in by the same per-visit functions behind `GET /visits/:id/consultations`, `/prescriptions`, `/lab-orders` and `/vitals`, so each list equals what that route returns (prescriptions redacted per role exactly as there). `[]` if the patient has no other visits. No pagination. Not audited.
+- Doctor and owner only — narrower than the per-visit reads it aggregates, which are open to any authenticated role.
+- Errors: `NOT_FOUND` 404 "Patient not found"; `VALIDATION_ERROR` 400 for a malformed `excludeVisitId` or an unknown query key.
 - Path error message: "Invalid id format".
 
 #### `PATCH /api/v1/patients/:id` — reception
@@ -677,7 +689,7 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 ### 7.1 Pagination
 - **Only `GET /audit-logs`** is paginated: `limit` (1–100, default 20) + `offset` (default 0); `total`, `limit`, `offset` are returned **inside `data`**, not `meta`.
 - `GET /patients` has `limit` only (1–100, default 20) — no offset, no total.
-- Everything else returns the full list: users, suppliers, purchases (with items), price list items, inventory items, lab queue, pharmacy queue, billing work list, today's visits, and the visit-scoped/patient-scoped lists (`/visits/:id/consultations|lab-orders|prescriptions`, `/patients/:id/visits`).
+- Everything else returns the full list: users, suppliers, purchases (with items), price list items, inventory items, lab queue, pharmacy queue, billing work list, today's visits, and the visit-scoped/patient-scoped lists (`/visits/:id/consultations|lab-orders|prescriptions`, `/patients/:id/visits`, `/patients/:id/history`).
 
 ### 7.2 Validation error details
 - `details` = `Record<string, string[]>` keyed by field (nested/array paths are keyed by their **top-level** field, e.g. `items`).

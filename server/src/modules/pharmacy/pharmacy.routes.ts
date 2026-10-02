@@ -42,7 +42,7 @@ function requireUuidParam(value: string, label = "id") {
  * information, not a stock-system internal identifier the way
  * inventoryItemId is.
  */
-function redactForRole(detail: PharmacyPrescriptionDetail, role: Role): PharmacyPrescriptionDetail {
+export function redactForRole(detail: PharmacyPrescriptionDetail, role: Role): PharmacyPrescriptionDetail {
   if (role === ROLES.PHARMACY || role === ROLES.OWNER) {
     return detail;
   }

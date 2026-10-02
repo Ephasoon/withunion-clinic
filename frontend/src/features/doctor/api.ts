@@ -1,4 +1,5 @@
 import { api } from "../../api";
+import { toVitalSigns } from "../nursing/vitals";
 import type { Visit } from "../visits/types";
 import type {
   CompletionStatus,
@@ -7,12 +8,32 @@ import type {
   Diagnosis,
   LabOrderCreated,
   LabOrderDetail,
+  PatientHistoryVisit,
+  PatientHistoryVisitResponse,
   PrescriptionDetail,
   PrescriptionItemBody,
 } from "./types";
 
 const visitPath = (visitId: string) => `/api/v1/visits/${encodeURIComponent(visitId)}`;
 const consultationPath = (consultationId: string) => `/api/v1/consultations/${encodeURIComponent(consultationId)}`;
+
+/**
+ * GET /patients/:id/history?excludeVisitId= → { visits } — every other
+ * visit of the patient (any status, newest first), each with its
+ * consultations + diagnoses, prescriptions, lab orders + results and
+ * vitals. Vitals are converted like GET /visits/:id/vitals.
+ */
+export async function fetchPatientHistory(
+  patientId: string,
+  excludeVisitId: string,
+  signal?: AbortSignal
+): Promise<PatientHistoryVisit[]> {
+  const { visits } = await api.get<{ visits: PatientHistoryVisitResponse[] }>(
+    `/api/v1/patients/${encodeURIComponent(patientId)}/history`,
+    { query: { excludeVisitId }, signal }
+  );
+  return visits.map((visit) => ({ ...visit, vitals: visit.vitals.map(toVitalSigns) }));
+}
 
 /**
  * POST /visits/:id/consultations (no body) → 201 { consultation }.
