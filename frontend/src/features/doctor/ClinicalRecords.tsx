@@ -10,8 +10,8 @@ import type { ConsultationWithDiagnoses, LabOrderDetail, PrescriptionDetail } fr
 
 /** Read-only clinical records shown on the doctor's visit and consultation pages. */
 
-/** Loading, error and empty states for a list query; `select` narrows the list (e.g. to one consultation). */
-function QueryList<T>({
+/** Loading, error and empty states for a list query; `select` narrows the list (e.g. to one consultation). Also used by Billing. */
+export function QueryList<T>({
   query,
   select = (items) => items,
   loadingLabel,

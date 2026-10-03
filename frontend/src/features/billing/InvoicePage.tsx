@@ -11,6 +11,7 @@ import { AddItemsForm, PaymentForm } from "./InvoiceEditors";
 import { formatMoney, isZeroBalance } from "./money";
 import { useCreateInvoice, useInvoice, useInvoiceMutations, useVisitInvoice } from "./queries";
 import { PAYMENT_METHOD_LABELS, type InvoiceDetail } from "./types";
+import { VisitRecord } from "./VisitRecord";
 
 function Totals({ invoice }: { invoice: InvoiceDetail }) {
   const rows = [
@@ -123,6 +124,7 @@ export function InvoicePage() {
               : "This visit has no invoice."}
           </EmptyState>
         )}
+        <VisitRecord visitId={visit.id} />
       </section>
     );
   }
@@ -206,6 +208,9 @@ export function InvoicePage() {
           )}
         </div>
       </div>
+
+      {/* Above "Add charges" so reception sees what was done before deciding what to bill. */}
+      <VisitRecord visitId={visit.id} />
 
       {actions.canAddItems && <AddItemsForm mutation={addItems} />}
       {actions.canRecordPayment && <PaymentForm mutation={pay} balance={invoice.balance} />}
