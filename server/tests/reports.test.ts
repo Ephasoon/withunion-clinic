@@ -12,17 +12,35 @@ async function loginAs(username: string) {
   return agent;
 }
 
-function daysAgo(n: number): Date {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - n);
-  return d;
-}
+/**
+ * "Today" as the database sees it (CURRENT_DATE in the session time
+ * zone, i.e. clinic time), read once in beforeAll. The report queries
+ * use that same clock, so the tests must too: a JS/UTC "today" is a
+ * day behind clinic time between 00:00 and 03:00 local.
+ */
+let today: string;
 
-function isoDate(d: Date): string {
+/** The clinic-time calendar day n days before today, as "YYYY-MM-DD". */
+function daysAgo(n: number): string {
+  // Pure calendar arithmetic: UTC here is only a time-zone-free
+  // container for the date, never a clock.
+  const d = new Date(`${today}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - n);
   return d.toISOString().slice(0, 10);
 }
 
-async function createPatientAndVisit(status: string, createdAt: Date, uniquePart: string) {
+/**
+ * A timestamp at the given wall-clock time on `day`, as a literal
+ * Postgres resolves in the session time zone, the same way the
+ * reports resolve their `$1::date` bounds. No offset is hardcoded.
+ */
+function at(day: string, time = "12:00:00"): string {
+  return `${day} ${time}`;
+}
+
+type Timestamp = Date | string;
+
+async function createPatientAndVisit(status: string, createdAt: Timestamp, uniquePart: string) {
   const receptionId = await getUserIdByUsername("test.reception");
   const patientCode = `WU${Date.now().toString(36).slice(-6)}${uniquePart}`.slice(0, 20);
   const patientRes = await pool.query(
@@ -38,7 +56,7 @@ async function createPatientAndVisit(status: string, createdAt: Date, uniquePart
   return { patientId, visitId: visitRes.rows[0].id, patientCode };
 }
 
-async function createInvoiceFixture(opts: { discount?: number; createdAt?: Date } = {}) {
+async function createInvoiceFixture(opts: { discount?: number; createdAt?: Timestamp } = {}) {
   const receptionId = await getUserIdByUsername("test.reception");
   const { visitId, patientCode } = await createPatientAndVisit(
     "WAITING_FOR_BILLING",
@@ -59,7 +77,7 @@ async function addItem(invoiceId: string, description: string, quantity: number,
   );
 }
 
-async function addPayment(invoiceId: string, amount: number, method: string, paidAt?: Date) {
+async function addPayment(invoiceId: string, amount: number, method: string, paidAt?: Timestamp) {
   const receptionId = await getUserIdByUsername("test.reception");
   await pool.query(
     `INSERT INTO payments (invoice_id, amount, method, recorded_by, paid_at) VALUES ($1, $2, $3, $4, $5)`,
@@ -88,14 +106,14 @@ async function createInventoryItem(quantityOnHand = 0) {
 
 async function createPurchase(opts: {
   supplierId: string;
-  purchaseDate: Date;
+  purchaseDate: string;
   status: "PENDING" | "RECEIVED";
   items: Array<{ inventoryItemId: string; quantity: number; unitCost: number }>;
 }) {
   const ownerId = await getUserIdByUsername("test.owner");
   const purchaseRes = await pool.query(
     `INSERT INTO purchases (supplier_id, purchase_date, status, created_by) VALUES ($1, $2, $3, $4) RETURNING id`,
-    [opts.supplierId, isoDate(opts.purchaseDate), opts.status, ownerId]
+    [opts.supplierId, opts.purchaseDate, opts.status, ownerId]
   );
   const purchaseId = purchaseRes.rows[0].id;
   for (const item of opts.items) {
@@ -110,7 +128,7 @@ async function createPurchase(opts: {
 async function createDispensedPrescriptionItem(opts: {
   status: "PENDING" | "PARTIALLY_DISPENSED" | "DISPENSED" | "UNAVAILABLE";
   quantityDispensed?: number;
-  dispensedAt?: Date;
+  dispensedAt?: Timestamp;
 }) {
   const doctorId = await getUserIdByUsername("test.doctor");
   const { visitId } = await createPatientAndVisit("WITH_DOCTOR", new Date(), Math.random().toString(36).slice(2, 6));
@@ -134,6 +152,7 @@ async function createDispensedPrescriptionItem(opts: {
 
 beforeAll(async () => {
   await seedTestUsers();
+  today = (await pool.query<{ today: string }>("SELECT CURRENT_DATE::text AS today")).rows[0].today;
 });
 
 afterAll(async () => {
@@ -172,8 +191,8 @@ describe("Date range resolution", () => {
     const owner = await loginAs("test.owner");
     const res = await owner.get("/api/v1/reports/visits");
     expect(res.status).toBe(200);
-    expect(res.body.data.report.dateTo).toBe(isoDate(new Date()));
-    expect(res.body.data.report.dateFrom).toBe(isoDate(daysAgo(29)));
+    expect(res.body.data.report.dateTo).toBe(today);
+    expect(res.body.data.report.dateFrom).toBe(daysAgo(29));
   });
 
   it("uses explicit dateFrom/dateTo when provided", async () => {
@@ -199,12 +218,12 @@ describe("Date range resolution", () => {
   it("includes a record created at the exact dateTo boundary (inclusive)", async () => {
     const owner = await loginAs("test.owner");
     const boundaryDay = daysAgo(5);
-    const lateInDay = new Date(boundaryDay);
-    // Report days follow clinic time (UTC+3), so 23:59 local is 20:59 UTC.
-    lateInDay.setUTCHours(20, 59, 0, 0);
-    await createPatientAndVisit("REGISTERED", lateInDay, "bound1");
+    // 23:59 clinic time, the last minute of the dateTo day. Postgres
+    // resolves the literal in the session time zone, so this stays
+    // correct without spelling out the UTC+3 offset.
+    await createPatientAndVisit("REGISTERED", at(boundaryDay, "23:59:00"), "bound1");
 
-    const res = await owner.get("/api/v1/reports/visits").query({ dateFrom: isoDate(daysAgo(5)), dateTo: isoDate(daysAgo(5)) });
+    const res = await owner.get("/api/v1/reports/visits").query({ dateFrom: boundaryDay, dateTo: boundaryDay });
     expect(res.status).toBe(200);
     expect(res.body.data.report.totalCount).toBeGreaterThanOrEqual(1);
   });
@@ -229,11 +248,11 @@ describe("Visits report", () => {
   it("reports counts by status and by date within range", async () => {
     const owner = await loginAs("test.owner");
     const day = daysAgo(3);
-    await createPatientAndVisit("CANCELLED", day, "vis1");
-    await createPatientAndVisit("CANCELLED", day, "vis2");
-    await createPatientAndVisit("REGISTERED", day, "vis3");
+    await createPatientAndVisit("CANCELLED", at(day), "vis1");
+    await createPatientAndVisit("CANCELLED", at(day), "vis2");
+    await createPatientAndVisit("REGISTERED", at(day), "vis3");
 
-    const res = await owner.get("/api/v1/reports/visits").query({ dateFrom: isoDate(day), dateTo: isoDate(day) });
+    const res = await owner.get("/api/v1/reports/visits").query({ dateFrom: day, dateTo: day });
     expect(res.status).toBe(200);
     const cancelled = res.body.data.report.byStatus.find((r: { status: string }) => r.status === "CANCELLED");
     expect(cancelled.count).toBeGreaterThanOrEqual(2);
@@ -242,11 +261,11 @@ describe("Visits report", () => {
   it("supports an optional status filter", async () => {
     const owner = await loginAs("test.owner");
     const day = daysAgo(4);
-    await createPatientAndVisit("COMPLETED", day, "vis4");
+    await createPatientAndVisit("COMPLETED", at(day), "vis4");
 
     const res = await owner
       .get("/api/v1/reports/visits")
-      .query({ dateFrom: isoDate(day), dateTo: isoDate(day), status: "COMPLETED" });
+      .query({ dateFrom: day, dateTo: day, status: "COMPLETED" });
     expect(res.status).toBe(200);
     expect(res.body.data.report.byStatus.every((r: { status: string }) => r.status === "COMPLETED")).toBe(true);
   });
@@ -270,13 +289,13 @@ describe("Financial report", () => {
   it("calculates total revenue, payment count, and method breakdown correctly", async () => {
     const owner = await loginAs("test.owner");
     const day = daysAgo(2);
-    const { invoiceId } = await createInvoiceFixture({ createdAt: day });
+    const { invoiceId } = await createInvoiceFixture({ createdAt: at(day) });
     await addItem(invoiceId, "Consultation", 1, 300);
-    await addPayment(invoiceId, 200, "cash", day);
-    await addPayment(invoiceId, 100, "bank_transfer", day);
+    await addPayment(invoiceId, 200, "cash", at(day));
+    await addPayment(invoiceId, 100, "bank_transfer", at(day));
     await markInvoicePaid(invoiceId);
 
-    const res = await owner.get("/api/v1/reports/financial").query({ dateFrom: isoDate(day), dateTo: isoDate(day) });
+    const res = await owner.get("/api/v1/reports/financial").query({ dateFrom: day, dateTo: day });
     expect(res.status).toBe(200);
     const r = res.body.data.report;
     expect(r.totalRevenue).toBeGreaterThanOrEqual(300);
@@ -290,31 +309,31 @@ describe("Financial report", () => {
   it("groups by day", async () => {
     const owner = await loginAs("test.owner");
     const day = daysAgo(6);
-    const { invoiceId } = await createInvoiceFixture({ createdAt: day });
+    const { invoiceId } = await createInvoiceFixture({ createdAt: at(day) });
     await addItem(invoiceId, "X", 1, 50);
-    await addPayment(invoiceId, 50, "cash", day);
+    await addPayment(invoiceId, 50, "cash", at(day));
     await markInvoicePaid(invoiceId);
 
     const res = await owner
       .get("/api/v1/reports/financial")
-      .query({ dateFrom: isoDate(day), dateTo: isoDate(day), groupBy: "day" });
+      .query({ dateFrom: day, dateTo: day, groupBy: "day" });
     expect(res.status).toBe(200);
-    expect(res.body.data.report.byPeriod.some((p: { period: string }) => p.period === isoDate(day))).toBe(true);
+    expect(res.body.data.report.byPeriod.some((p: { period: string }) => p.period === day)).toBe(true);
   });
 
   it("groups by month", async () => {
     const owner = await loginAs("test.owner");
     const day = daysAgo(7);
-    const { invoiceId } = await createInvoiceFixture({ createdAt: day });
+    const { invoiceId } = await createInvoiceFixture({ createdAt: at(day) });
     await addItem(invoiceId, "X", 1, 50);
-    await addPayment(invoiceId, 50, "cash", day);
+    await addPayment(invoiceId, 50, "cash", at(day));
     await markInvoicePaid(invoiceId);
 
     const res = await owner
       .get("/api/v1/reports/financial")
-      .query({ dateFrom: isoDate(day), dateTo: isoDate(day), groupBy: "month" });
+      .query({ dateFrom: day, dateTo: day, groupBy: "month" });
     expect(res.status).toBe(200);
-    const expectedMonth = isoDate(day).slice(0, 7);
+    const expectedMonth = day.slice(0, 7);
     expect(res.body.data.report.byPeriod.some((p: { period: string }) => p.period === expectedMonth)).toBe(true);
   });
 
@@ -327,16 +346,16 @@ describe("Financial report", () => {
   it("lists outstanding OPEN invoices with correct subtotal/discount/total/paid/balance, excluding fully paid ones", async () => {
     const owner = await loginAs("test.owner");
     const day = daysAgo(1);
-    const { invoiceId: openId } = await createInvoiceFixture({ createdAt: day, discount: 5 });
+    const { invoiceId: openId } = await createInvoiceFixture({ createdAt: at(day), discount: 5 });
     await addItem(openId, "Procedure", 1, 200);
-    await addPayment(openId, 50, "cash", day);
+    await addPayment(openId, 50, "cash", at(day));
 
-    const { invoiceId: paidId } = await createInvoiceFixture({ createdAt: day });
+    const { invoiceId: paidId } = await createInvoiceFixture({ createdAt: at(day) });
     await addItem(paidId, "Consultation", 1, 100);
-    await addPayment(paidId, 100, "cash", day);
+    await addPayment(paidId, 100, "cash", at(day));
     await markInvoicePaid(paidId);
 
-    const res = await owner.get("/api/v1/reports/financial").query({ dateFrom: isoDate(day), dateTo: isoDate(day) });
+    const res = await owner.get("/api/v1/reports/financial").query({ dateFrom: day, dateTo: day });
     expect(res.status).toBe(200);
     const outstanding = res.body.data.report.outstandingInvoices;
     const openEntry = outstanding.find((o: { invoiceId: string }) => o.invoiceId === openId);
@@ -370,7 +389,7 @@ describe("Purchasing report", () => {
 
     const res = await owner
       .get("/api/v1/reports/purchasing")
-      .query({ dateFrom: isoDate(day), dateTo: isoDate(day), supplierId });
+      .query({ dateFrom: day, dateTo: day, supplierId });
     expect(res.status).toBe(200);
     const r = res.body.data.report;
     expect(r.totalPurchases).toBe(1);
@@ -393,7 +412,7 @@ describe("Purchasing report", () => {
 
     const res = await owner
       .get("/api/v1/reports/purchasing")
-      .query({ dateFrom: isoDate(day), dateTo: isoDate(day), supplierId, status: "RECEIVED" });
+      .query({ dateFrom: day, dateTo: day, supplierId, status: "RECEIVED" });
     expect(res.status).toBe(200);
     expect(res.body.data.report.totalPurchases).toBe(0);
   });
@@ -410,12 +429,12 @@ describe("Pharmacy dispensing report", () => {
   it("aggregates dispensed items by status and date using dispensed_at", async () => {
     const owner = await loginAs("test.owner");
     const day = daysAgo(15);
-    await createDispensedPrescriptionItem({ status: "DISPENSED", quantityDispensed: 10, dispensedAt: day });
-    await createDispensedPrescriptionItem({ status: "PARTIALLY_DISPENSED", quantityDispensed: 4, dispensedAt: day });
+    await createDispensedPrescriptionItem({ status: "DISPENSED", quantityDispensed: 10, dispensedAt: at(day) });
+    await createDispensedPrescriptionItem({ status: "PARTIALLY_DISPENSED", quantityDispensed: 4, dispensedAt: at(day) });
 
     const res = await owner
       .get("/api/v1/reports/pharmacy-dispensing")
-      .query({ dateFrom: isoDate(day), dateTo: isoDate(day) });
+      .query({ dateFrom: day, dateTo: day });
     expect(res.status).toBe(200);
     const r = res.body.data.report;
     expect(r.totalItemsDispensed).toBeGreaterThanOrEqual(2);
