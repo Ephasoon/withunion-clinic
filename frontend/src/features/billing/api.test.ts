@@ -5,9 +5,11 @@ import {
   completeBilling,
   createInvoice,
   fetchBillingWork,
+  fetchChargeLinks,
   fetchInvoice,
   fetchVisitInvoice,
   recordPayment,
+  saveChargeLink,
 } from "./api";
 
 /** The exact requests the billing and receipt API functions send, against docs/api-inventory.md §5.10–5.11. */
@@ -84,6 +86,27 @@ describe("billing writes", () => {
     expect(call(fetchMock)).toEqual({ url: "/api/v1/billing/invoices/i1/complete", method: "POST", body: undefined });
     expect(call(fetchMock).url).not.toContain("/transition");
     expect(result.visitStatus).toBe("COMPLETED");
+  });
+});
+
+describe("charge links", () => {
+  it("fetchChargeLinks: GET /api/v1/charge-links, reads the links key", async () => {
+    const fetchMock = stubFetch({ links: [{ id: "l1", nameKey: "amoxicillin", priceListItemId: "p1" }] });
+    const links = await fetchChargeLinks();
+    expect(call(fetchMock)).toEqual({ url: "/api/v1/charge-links", method: "GET", body: undefined });
+    expect(links[0]?.nameKey).toBe("amoxicillin");
+  });
+
+  it("saveChargeLink: PUT /api/v1/charge-links { name, priceListItemId } and nothing else", async () => {
+    const fetchMock = stubFetch({ link: { id: "l1" } });
+    const extra = { name: "Amoxicillin", priceListItemId: "p1", nameKey: "x" } as { name: string; priceListItemId: string };
+    const link = await saveChargeLink(extra);
+    expect(call(fetchMock)).toEqual({
+      url: "/api/v1/charge-links",
+      method: "PUT",
+      body: { name: "Amoxicillin", priceListItemId: "p1" },
+    });
+    expect(link.id).toBe("l1");
   });
 });
 

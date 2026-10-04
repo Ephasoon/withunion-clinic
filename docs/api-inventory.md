@@ -203,6 +203,7 @@ PurchaseDetail  { id, supplierId, supplierName, purchaseDate: "YYYY-MM-DD" strin
                   receivedBy: uuid|null, receivedAt: timestamp|null,
                   items: [{ id, inventoryItemId, inventoryItemName, quantity: number, unitCost: number }] } // item name ASC
 PriceListItem   { id, name, price: number /* 2 dp */, isActive: boolean, createdBy: uuid, createdAt: timestamp, updatedAt: timestamp }
+ChargeNameLink  { id, nameKey: string /* normalized name */, priceListItemId: uuid, createdBy: uuid, createdAt: timestamp }
 PatientHistoryVisit = Visit & {
                   consultations: Array<Consultation & { diagnoses: Diagnosis[] }>,  // startedAt ASC
                   prescriptions: PharmacyPrescriptionDetail[],                    // createdAt ASC, inventoryItemId redacted per role
@@ -214,7 +215,7 @@ PatientHistoryVisit = Visit & {
 
 ## 5. Route inventory
 
-73 routes: `GET /health` + 72 under `/api/v1`. Role column: "any" = any authenticated user; "public" = no auth.
+75 routes: `GET /health` + 74 under `/api/v1`. Role column: "any" = any authenticated user; "public" = no auth.
 
 ### 5.0 Health
 
@@ -635,6 +636,17 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 - **200** `{ data: { item: PriceListItem } }`. Errors: `NOT_FOUND` 404 "Price list item not found"; `PRICE_LIST_ITEM_ALREADY_EXISTS` 409 when `name` matches **another** item (re-casing an item's own name is allowed).
 - Audits `price_list_item.update` (before/after); a deactivation (`isActive: false` on an active item) additionally records `price_list_item.deactivate`, as Suppliers does.
 
+### 5.18 Charge links — `modules/charge-links` (owner, reception)
+
+Billing's saved answers to "which price-list item is this medicine / lab test charged as?", used by the invoice page's charge suggestions. Table `charge_name_links` (`id` uuid PK, `name_key` text — unique index `charge_name_links_name_key_idx`, `price_list_item_id` → `price_list_items` ON DELETE RESTRICT, `created_by` → `users`, `created_at`). `name_key` is the normalized name from `utils/chargeName.ts`: trimmed, every whitespace run (unicode spaces included) collapsed to one space, lowercased. Matching is exact equality of normalized names — nothing fuzzy. No delete endpoint.
+
+#### `GET /api/v1/charge-links` — owner, reception — **200** `{ data: { links: ChargeNameLink[] } }` (all, `nameKey ASC`, no pagination). Links whose price-list item is now inactive are still returned; callers check `isActive` against `GET /price-list`. Not audited.
+#### `PUT /api/v1/charge-links` — owner, reception
+- **Body**: `{ name: string (trim, 1–255), priceListItemId: uuid }` (strict). The server normalizes `name` into `nameKey`.
+- Upsert by `nameKey`: **201** `{ data: { link: ChargeNameLink } }` when created, **200** when the existing link for that name was replaced (same `id`; `priceListItemId`, `createdBy` and `createdAt` become the new saver's).
+- Errors: `NOT_FOUND` 404 "Price list item not found"; `PRICE_LIST_ITEM_INACTIVE` 409 when the item is inactive (an existing link is left unchanged).
+- Audits `charge_link.save` with `before` (`null` on create) and `after` (`ChargeNameLink`).
+
 ---
 
 ## 6. Error catalog (deduplicated)
@@ -651,7 +663,7 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 | `VALIDATION_ERROR` | 400 | "Invalid id format" / "Invalid visit id format" / "Invalid invoiceId format" | every `*.routes.ts` with a path id | path param not UUID-shaped |
 | `VALIDATION_ERROR` | 400 | "reason is required to cancel a visit" | `visits/visits.service.ts` | cancel without reason |
 | `VALIDATION_ERROR` | 400 | "Unknown role …" | `users/users.service.ts` | role row missing (defensive) |
-| `NOT_FOUND` | 404 | "<Resource> not found" | patients, users, visits, nursing, consultation, laboratory, pharmacy, billing, receipts, audit-log, suppliers, purchases, price-list | id well-formed but no row |
+| `NOT_FOUND` | 404 | "<Resource> not found" | patients, users, visits, nursing, consultation, laboratory, pharmacy, billing, receipts, audit-log, suppliers, purchases, price-list, charge-links | id well-formed but no row |
 | `NOT_FOUND` | 404 | "No route for METHOD /path" (no `details` key) | `middleware/errorHandler.ts` | unmatched route |
 | `INVALID_CREDENTIALS` | 401 | "Invalid username or password" | `auth/auth.routes.ts` | bad username/password or inactive |
 | `RATE_LIMITED` | 429 | "Too many login attempts. Try again later." (no `details` key) | `auth/auth.routes.ts` (express-rate-limit) | login limit exceeded |
@@ -680,6 +692,7 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 | `INVALID_INVENTORY_ITEM` | 400 | "Inventory item X does not exist" | `purchases/purchases.service.ts` | purchase line with unknown item |
 | `PURCHASE_ALREADY_RECEIVED` | 409 | "Purchase is already RECEIVED" | `purchases/purchases.service.ts` | second receive |
 | `PRICE_LIST_ITEM_ALREADY_EXISTS` | 409 | "A price list item named \"x\" already exists" | `price-list/price-list.service.ts` | duplicate normalized name on create, or rename onto another item's name |
+| `PRICE_LIST_ITEM_INACTIVE` | 409 | "This price list item is inactive and can't be linked" | `charge-links/charge-links.service.ts` | `PUT /charge-links` naming an inactive price-list item |
 | `INTERNAL_ERROR` | 500 | "Something went wrong. Please try again." (no `details` key) | `middleware/errorHandler.ts` | any non-AppError, **including malformed JSON bodies** |
 
 ---
@@ -748,7 +761,7 @@ All four share a strict query schema: `dateFrom?: "YYYY-MM-DD"`, `dateTo?: "YYYY
 - `GET /health` — 503 carries `data` with `error: null`.
 - `POST /api/v1/auth/login` 429 — produced by express-rate-limit (envelope-shaped, no `details`).
 - Unknown route 404 and every 500 — envelope without `details`.
-- Response keys that differ from the entity name: `POST /consultations/:id/lab-orders` → `labOrder`; `GET /laboratory/orders` and `GET /visits/:id/lab-orders` → `orders`; `GET /billing/invoices` → `work`; Price List routes → `items` / `item`; nursing assessment and completion routes return a `visitStatus` string alongside the entity.
+- Response keys that differ from the entity name: `POST /consultations/:id/lab-orders` → `labOrder`; `GET /laboratory/orders` and `GET /visits/:id/lab-orders` → `orders`; `GET /billing/invoices` → `work`; Price List routes → `items` / `item`; Charge links → `links` / `link`; nursing assessment and completion routes return a `visitStatus` string alongside the entity.
 
 ### 7.9 Read endpoints the frontend may expect but which do not exist
 - No cross-patient visit search or date-ranged visit list. Visits are reachable through `/visits/today` (created today only), `GET /visits/:id`, and a patient's history (`GET /patients/:id/visits`) — so a visit created yesterday and still in progress does not appear in any **queue**, though it does appear in its patient's history.

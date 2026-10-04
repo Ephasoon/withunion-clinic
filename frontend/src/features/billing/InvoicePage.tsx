@@ -9,7 +9,8 @@ import { allowedBillingActions } from "./billingActions";
 import { billingErrorMessage } from "./billingErrors";
 import { AddItemsForm, PaymentForm } from "./InvoiceEditors";
 import { formatMoney, isZeroBalance } from "./money";
-import { useCreateInvoice, useInvoice, useInvoiceMutations, useVisitInvoice } from "./queries";
+import { useAddInvoiceItems, useCreateInvoice, useInvoice, useInvoiceMutations, useVisitInvoice } from "./queries";
+import { SuggestedCharges } from "./SuggestedCharges";
 import { PAYMENT_METHOD_LABELS, type InvoiceDetail } from "./types";
 import { VisitRecord } from "./VisitRecord";
 
@@ -55,6 +56,8 @@ export function InvoicePage() {
   const invoiceQuery = useInvoice(invoiceId);
   const create = useCreateInvoice(visitId);
   const { addItems, pay, complete } = useInvoiceMutations(invoiceId ?? "", visitId);
+  // Suggested charges add through the same request, with their own pending/error state.
+  const addSuggested = useAddInvoiceItems(invoiceId ?? "", visitId);
 
   if (visitQuery.isPending) return <LoadingState label="Loading visit…" />;
   if (visitQuery.isError) {
@@ -212,6 +215,9 @@ export function InvoicePage() {
       {/* Above "Add charges" so reception sees what was done before deciding what to bill. */}
       <VisitRecord visitId={visit.id} />
 
+      {/* Beside the record it is built from; only while charges can be added. Never adds anything by itself. */}
+      {actions.canAddItems && <SuggestedCharges visitId={visit.id} invoice={invoice} mutation={addSuggested} />}
+
       {actions.canAddItems && <AddItemsForm mutation={addItems} />}
       {actions.canRecordPayment && <PaymentForm mutation={pay} balance={invoice.balance} />}
 
@@ -233,7 +239,9 @@ export function InvoicePage() {
           <button
             type="button"
             onClick={() => complete.mutate()}
-            disabled={!actions.canComplete || complete.isPending || addItems.isPending || pay.isPending}
+            disabled={
+              !actions.canComplete || complete.isPending || addItems.isPending || addSuggested.isPending || pay.isPending
+            }
             className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
           >
             {complete.isPending ? "Completing…" : "Complete billing"}

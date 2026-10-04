@@ -7,17 +7,20 @@ import {
   completeBilling,
   createInvoice,
   fetchBillingWork,
+  fetchChargeLinks,
   fetchInvoice,
   fetchVisitInvoice,
   recordPayment,
+  saveChargeLink,
 } from "./api";
-import type { InvoiceDetail, InvoiceItemBody, PaymentBody } from "./types";
+import type { InvoiceDetail, InvoiceItemBody, PaymentBody, SaveChargeLinkBody } from "./types";
 
 export const billingKeys = {
   work: ["billing", "work"] as const,
   invoice: (invoiceId: string) => ["billing", "invoice", invoiceId] as const,
   visitInvoice: (visitId: string) => ["billing", "visit-invoice", visitId] as const,
   receipt: (invoiceId: string) => ["billing", "receipt", invoiceId] as const,
+  chargeLinks: ["billing", "charge-links"] as const,
 };
 
 export const BILLING_WORK_REFRESH_MS = 15_000;
@@ -86,12 +89,22 @@ export function useCreateInvoice(visitId: string) {
   });
 }
 
-export function useInvoiceMutations(invoiceId: string, visitId: string) {
+/**
+ * POST /billing/invoices/:id/items. Used by "Add charges" (through
+ * useInvoiceMutations) and, as its own instance so its pending/error
+ * state stays separate, by "Suggested charges" — the same request either way.
+ */
+export function useAddInvoiceItems(invoiceId: string, visitId: string) {
   const queryClient = useQueryClient();
-  const addItems = useMutation({
+  return useMutation({
     mutationFn: (items: InvoiceItemBody[]) => addInvoiceItems(invoiceId, items),
     onSettled: (invoice) => afterBillingChange(queryClient, visitId, invoice),
   });
+}
+
+export function useInvoiceMutations(invoiceId: string, visitId: string) {
+  const queryClient = useQueryClient();
+  const addItems = useAddInvoiceItems(invoiceId, visitId);
   const pay = useMutation({
     mutationFn: (payment: PaymentBody) => recordPayment(invoiceId, payment),
     onSettled: (invoice) => afterBillingChange(queryClient, visitId, invoice),
@@ -101,4 +114,22 @@ export function useInvoiceMutations(invoiceId: string, visitId: string) {
     onSettled: (result) => afterBillingChange(queryClient, visitId, result?.invoice),
   });
   return { addItems, pay, complete };
+}
+
+/** Saved name → price-list item links (GET /charge-links), for the invoice page's suggestions. */
+export function useChargeLinks(enabled: boolean) {
+  return useQuery({
+    queryKey: billingKeys.chargeLinks,
+    queryFn: ({ signal }) => fetchChargeLinks(signal),
+    enabled,
+  });
+}
+
+/** PUT /charge-links. The links refetch afterwards — success or failure — so suggestions show the saved state. */
+export function useSaveChargeLink() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SaveChargeLinkBody) => saveChargeLink(body),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: billingKeys.chargeLinks }),
+  });
 }

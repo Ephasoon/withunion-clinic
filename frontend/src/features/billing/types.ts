@@ -50,3 +50,19 @@ export interface PaymentBody {
   amount: number;
   method: PaymentMethod;
 }
+
+/** docs §4 ChargeNameLink and §5.18 — a saved "this name is charged as that price-list item". */
+export interface ChargeNameLink {
+  id: string;
+  /** The normalized name (see normalizeChargeName). */
+  nameKey: string;
+  priceListItemId: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** Body of PUT /charge-links. Strict: only these keys. */
+export interface SaveChargeLinkBody {
+  name: string;
+  priceListItemId: string;
+}
