@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api";
-import { describeApiError } from "./errorMessages";
+import { describeApiError, patientPhoneConflict, patientPhoneConflictMessage } from "./errorMessages";
 
 describe("describeApiError", () => {
   it("VALIDATION_ERROR: body/query failures point to the fields", () => {
@@ -52,5 +52,31 @@ describe("describeApiError", () => {
     expect(describeApiError(new ApiError(0, "NETWORK_ERROR", "x"))).toMatch(/reach the server/);
     expect(describeApiError(new ApiError(502, "HTTP_ERROR", "Request failed with status 502."))).toMatch(/not responding/);
     expect(describeApiError(new Error("boom"))).toBe("Something went wrong. Please try again.");
+  });
+});
+
+describe("PATIENT_PHONE_ALREADY_EXISTS", () => {
+  const details = { patientId: "p-1", patientCode: "WU-007005", fullName: "Desta Ledamo" };
+  const error = new ApiError(409, "PATIENT_PHONE_ALREADY_EXISTS", "This phone number already belongs to …", details);
+
+  it("names the patient who already has the number", () => {
+    expect(describeApiError(error)).toBe("This phone number already belongs to Desta Ledamo (WU-007005)");
+    expect(patientPhoneConflictMessage(details)).toBe("This phone number already belongs to Desta Ledamo (WU-007005)");
+  });
+
+  it("reads the existing patient from the details", () => {
+    expect(patientPhoneConflict(error)).toEqual(details);
+  });
+
+  it("falls back to generic text when the details are missing or malformed", () => {
+    const bare = new ApiError(409, "PATIENT_PHONE_ALREADY_EXISTS", "x", null);
+    expect(describeApiError(bare)).toBe("This phone number already belongs to another patient.");
+    expect(patientPhoneConflict(bare)).toBeNull();
+    expect(patientPhoneConflict(new ApiError(409, "PATIENT_PHONE_ALREADY_EXISTS", "x", { patientId: 1 }))).toBeNull();
+  });
+
+  it("is null for other errors", () => {
+    expect(patientPhoneConflict(new ApiError(409, "PRICE_LIST_ITEM_ALREADY_EXISTS", "x", details))).toBeNull();
+    expect(patientPhoneConflict(new Error("boom"))).toBeNull();
   });
 });

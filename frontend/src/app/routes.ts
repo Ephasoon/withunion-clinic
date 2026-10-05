@@ -31,6 +31,7 @@ import { PrescriptionPage } from "../features/pharmacy/PrescriptionPage";
 import { LabQueuePage } from "../features/laboratory/LabQueuePage";
 import { NurseQueuePage } from "../features/nursing/NurseQueuePage";
 import { NursingVisitPage } from "../features/nursing/NursingVisitPage";
+import { EditPatientPage } from "../features/patients/EditPatientPage";
 import { PatientDetailPage } from "../features/patients/PatientDetailPage";
 import { PatientSearchPage } from "../features/patients/PatientSearchPage";
 import { RegisterPatientPage } from "../features/patients/RegisterPatientPage";
@@ -67,6 +68,8 @@ export const featureRoutes: readonly FeatureRoute[] = [
   { path: "patients/new", roles: [ROLES.RECEPTION], Component: RegisterPatientPage },
   // GET /patients/:id and /:id/visits are open to any role; creating a visit (POST /visits) is reception only.
   { path: "patients/:patientId", roles: [ROLES.RECEPTION, ROLES.OWNER], Component: PatientDetailPage },
+  // PATCH /patients/:id (edit details, deactivate/reactivate) is reception only.
+  { path: "patients/:patientId/edit", roles: [ROLES.RECEPTION], Component: EditPatientPage },
   // Nursing: GET /visits/today is role-scoped to WAITING_FOR_NURSE/WITH_NURSE for nurses (§3.4); the owner
   // sees everything and the page filters. Writes (transition to WITH_NURSE, vitals, assessment) are nurse-only;
   // the owner may view.

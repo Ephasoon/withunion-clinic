@@ -8,6 +8,7 @@ import { ROLES } from "../../rbac/roles";
 import { CreateVisitPanel } from "../visits/CreateVisitPanel";
 import { VisitStatusBadge } from "../visits/VisitStatusBadge";
 import { patientAgeText } from "./patientDisplay";
+import { PatientStatusBadge } from "./PatientFields";
 import { usePatient, usePatientVisits } from "./queries";
 import { GENDER_LABELS } from "./types";
 
@@ -57,8 +58,15 @@ export function PatientDetailPage() {
         <div className="mt-1 flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold text-slate-900">{patient.fullName}</h1>
           <span className="font-mono text-sm text-slate-600">{patient.patientCode}</span>
-          {patient.status === "inactive" && (
-            <span className="rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-medium text-slate-700">Inactive</span>
+          {/* Inactive patients are not in search, but a direct link still opens them. */}
+          <PatientStatusBadge status={patient.status} />
+          {hasRole(user, ROLES.RECEPTION) && (
+            <Link
+              to={`/patients/${patient.id}/edit`}
+              className="ml-auto rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Edit patient
+            </Link>
           )}
         </div>
       </div>
@@ -67,8 +75,9 @@ export function PatientDetailPage() {
         <dl className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2 lg:col-span-2">
           <Detail label="Gender">{GENDER_LABELS[patient.gender]}</Detail>
           <Detail label="Age">{patientAgeText(patient, today)}</Detail>
-          <Detail label="Phone">{patient.phone ?? "—"}</Detail>
-          <Detail label="Address">{patient.address ?? "—"}</Detail>
+          {/* A cleared phone or address is stored as "" (PATCH can't set null), so "" shows as "—" too. */}
+          <Detail label="Phone">{patient.phone || "—"}</Detail>
+          <Detail label="Address">{patient.address || "—"}</Detail>
           <Detail label="Emergency contact">
             {patient.emergencyContactName || patient.emergencyContactPhone
               ? [patient.emergencyContactName, patient.emergencyContactPhone].filter(Boolean).join(" · ")

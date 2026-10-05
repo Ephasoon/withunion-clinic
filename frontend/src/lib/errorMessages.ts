@@ -22,6 +22,10 @@ export function describeApiError(error: unknown, options: { notFound?: string } 
       return error.message;
     case "NOT_FOUND":
       return options.notFound ?? error.message;
+    case "PATIENT_PHONE_ALREADY_EXISTS": {
+      const conflict = patientPhoneConflict(error);
+      return conflict ? patientPhoneConflictMessage(conflict) : "This phone number already belongs to another patient.";
+    }
     case "VISIT_TERMINAL":
       return "This visit is already completed or cancelled, so it can no longer be changed.";
     case "INVALID_VISIT_STATE":
@@ -39,4 +43,25 @@ export function describeApiError(error: unknown, options: { notFound?: string } 
   }
   if (error.status >= 500) return "The server is not responding. Please try again shortly.";
   return error.message;
+}
+
+/** The existing patient named in a PATIENT_PHONE_ALREADY_EXISTS error's details (docs §5.3). */
+export interface PatientPhoneConflict {
+  patientId: string;
+  patientCode: string;
+  fullName: string;
+}
+
+/** The patient who already has the phone number, or null when the error is anything else or lacks the details. */
+export function patientPhoneConflict(error: unknown): PatientPhoneConflict | null {
+  if (!isApiError(error) || error.code !== "PATIENT_PHONE_ALREADY_EXISTS") return null;
+  const details = error.details as Partial<Record<keyof PatientPhoneConflict, unknown>> | null;
+  if (typeof details !== "object" || details === null) return null;
+  const { patientId, patientCode, fullName } = details;
+  if (typeof patientId !== "string" || typeof patientCode !== "string" || typeof fullName !== "string") return null;
+  return { patientId, patientCode, fullName };
+}
+
+export function patientPhoneConflictMessage(conflict: PatientPhoneConflict): string {
+  return `This phone number already belongs to ${conflict.fullName} (${conflict.patientCode})`;
 }

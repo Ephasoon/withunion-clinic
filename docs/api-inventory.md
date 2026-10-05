@@ -287,7 +287,10 @@ PatientHistoryVisit = Visit & {
 #### `POST /api/v1/patients` — reception
 - **Body** (`CreatePatientSchema`): `{ fullName: string (trim, 1–255), gender: "male"|"female"|"other", dateOfBirth?: "YYYY-MM-DD", approximateAge?: int 0–150, phone?: string (trim, ≤32), address?: string (trim, ≤2000), emergencyContactName?: string (≤255), emergencyContactPhone?: string (≤32), notes?: string (≤2000) }` — refine: `dateOfBirth` or `approximateAge` required (error reported on `dateOfBirth`).
 - **201** `{ data: { patient: Patient } }` — `patientCode` generated from a DB sequence (`WU-` + 6 digits).
-- Errors: standard only.
+- **Phone uniqueness** (`patients.service.ts` `assertPhoneAvailable`, normalization in `utils/phone.ts`): a patient's own `phone` must not match the phone of **any** other patient, active or inactive. Numbers are compared normalized: every non-digit (spaces incl. unicode spaces, `+`, `-`, parentheses…) stripped, then a leading `251` and then a single leading `0` dropped — so `0935259622`, `+251 935 259 622`, `0935 259 622` and `+251 (0) 935-259-622` are the same number. A missing, blank or too-short phone (fewer than 6 digits left after normalizing) never conflicts. Names are not checked; `emergencyContactPhone` is not checked. POST is always checked.
+- Errors: `PATIENT_PHONE_ALREADY_EXISTS` 409 — `details: { patientId, patientCode, fullName }` of the existing patient (if several already share the number: the active one first, then the oldest).
+- **Known race:** the check runs inside the insert's transaction, but there is **no unique index** behind it (the dev data already holds duplicates — list them with `npx tsx server/src/db/duplicatePatientPhones.ts`, read-only). Two concurrent registrations with the same number can both pass the check and both be created; nothing catches it afterwards.
+- Audits `patient.create` (after value).
 
 #### `GET /api/v1/patients` — any
 - **Query** (`SearchPatientsQuerySchema`, not strict): `search?: string (trim, ≤255)`, `limit?: int 1–100, default 20`.
@@ -311,8 +314,10 @@ PatientHistoryVisit = Visit & {
 - Path error message: "Invalid id format".
 
 #### `PATCH /api/v1/patients/:id` — reception
-- **Body** (`UpdatePatientSchema`): every create field optional, plus `status?: "active"|"inactive"`. No refine — an **empty body `{}` is accepted** and returns the unchanged patient. Fields cannot be set to `null` (see 7.6).
-- **200** `{ data: { patient: Patient } }`. Errors: `NOT_FOUND` 404 "Patient not found".
+- **Body** (`UpdatePatientSchema`): every create field optional, plus `status?: "active"|"inactive"`. No refine — an **empty body `{}` is accepted** and returns the unchanged patient. Fields cannot be set to `null` (see 7.6); `phone: ""` is accepted and stored as an empty string (a blank phone never conflicts).
+- **Phone uniqueness** — the same rule as POST, but checked **only when the PATCH changes the normalized number**: a `phone` that normalizes to the patient's current number (re-sent as is, or re-formatted) is not a change and is not checked. So a patient who already shares a number with another (a legacy duplicate) can still have any other field edited, and can re-send its own number, but cannot be moved onto another patient's number. The patient being edited is excluded from the comparison. Same known race as POST (no unique index).
+- **200** `{ data: { patient: Patient } }`. Errors: `NOT_FOUND` 404 "Patient not found"; `PATIENT_PHONE_ALREADY_EXISTS` 409 (details as POST) when the new number belongs to another patient — nothing is written and nothing is audited.
+- Audits `patient.update` (before/after) on every successful PATCH. A status change additionally records `patient.deactivate` (`active` → `inactive`) or `patient.reactivate` (`inactive` → `active`), no before/after, as Suppliers' `supplier.deactivate`. Re-sending the current status records only `patient.update`.
 
 ### 5.4 Visits — `modules/visits`
 
@@ -691,6 +696,7 @@ Billing's saved answers to "which price-list item is this medicine / lab test ch
 | `RECEIPT_NOT_AVAILABLE_UNTIL_PAID` | 409 | "Receipts are only available once the invoice is fully paid (currently OPEN)" | `receipts/receipts.service.ts` | receipt for OPEN invoice |
 | `INVALID_INVENTORY_ITEM` | 400 | "Inventory item X does not exist" | `purchases/purchases.service.ts` | purchase line with unknown item |
 | `PURCHASE_ALREADY_RECEIVED` | 409 | "Purchase is already RECEIVED" | `purchases/purchases.service.ts` | second receive |
+| `PATIENT_PHONE_ALREADY_EXISTS` | 409 | "This phone number already belongs to <fullName> (<patientCode>)" + `details: { patientId, patientCode, fullName }` | `patients/patients.service.ts` | POST, or a PATCH that changes the phone, with a number (normalized) that another patient — active or inactive — already has |
 | `PRICE_LIST_ITEM_ALREADY_EXISTS` | 409 | "A price list item named \"x\" already exists" | `price-list/price-list.service.ts` | duplicate normalized name on create, or rename onto another item's name |
 | `PRICE_LIST_ITEM_INACTIVE` | 409 | "This price list item is inactive and can't be linked" | `charge-links/charge-links.service.ts` | `PUT /charge-links` naming an inactive price-list item |
 | `INTERNAL_ERROR` | 500 | "Something went wrong. Please try again." (no `details` key) | `middleware/errorHandler.ts` | any non-AppError, **including malformed JSON bodies** |
@@ -736,7 +742,7 @@ Billing's saved answers to "which price-list item is this medicine / lab test ch
 - **Prescription item:** `strength`, `dosage`, `frequency`, `duration`, `quantityPrescribed`, `quantityDispensed`, `inventoryItemId` (also redacted to null for most roles), `dispensedBy`, `dispensedAt`.
 - **Billing work:** `invoice` (null until created). **Supplier:** `contactPerson`, `phone`, `email`, `address`. **Purchase:** `referenceNumber`, `notes`, `receivedBy`, `receivedAt`.
 - **AuditLogEntry:** `user`, `entityId`, `beforeValue`, `afterValue`, `ipAddress`. **Reports:** echoed filters (`status`, `supplierId`) are null when absent.
-- **Clearing a field is impossible via PATCH:** Patients and Suppliers update schemas accept only strings (no `null`). Optional text fields can be set to `""`, but supplier `email: ""` fails email validation, so an email can never be removed.
+- **Clearing a field is impossible via PATCH:** Patients and Suppliers update schemas accept only strings (no `null`). Optional text fields can be set to `""`, but supplier `email: ""` fails email validation, so an email can never be removed. A patient's `dateOfBirth` (`""` is not a valid date) and `approximateAge` (number only) can likewise be changed but never removed. A patient `phone: ""` is stored as `""` — so `phone` may be `""` as well as `null` — and never conflicts with another patient's phone.
 
 ### 7.7 Status values / enums
 

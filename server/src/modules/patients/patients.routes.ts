@@ -132,6 +132,11 @@ patientsRouter.get(
 
 // Editing demographic/contact fields is reception-only, same as
 // registration — clinical roles never modify patient identity data.
+// Also deactivates/reactivates via status (there is no delete). A
+// status change additionally records patient.deactivate or
+// patient.reactivate, its own distinct audit action, following the
+// Suppliers/Users *.deactivate precedent, alongside the general
+// patient.update entry.
 patientsRouter.patch(
   "/:id",
   requireAuth,
@@ -154,6 +159,23 @@ patientsRouter.patch(
         afterValue: updated,
         ipAddress: req.ip,
       });
+      if (before.status === "active" && updated?.status === "inactive") {
+        await recordAudit({
+          userId: req.session.user!.id,
+          action: "patient.deactivate",
+          entity: "patients",
+          entityId: req.params.id,
+          ipAddress: req.ip,
+        });
+      } else if (before.status === "inactive" && updated?.status === "active") {
+        await recordAudit({
+          userId: req.session.user!.id,
+          action: "patient.reactivate",
+          entity: "patients",
+          entityId: req.params.id,
+          ipAddress: req.ip,
+        });
+      }
       res.json({ data: { patient: updated }, error: null, meta: null });
     } catch (err) {
       next(err);

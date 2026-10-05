@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createPatient, fetchPatient, fetchPatientVisits, searchPatients } from "./api";
-import type { CreatePatientBody } from "./types";
+import { createPatient, fetchPatient, fetchPatientVisits, searchPatients, updatePatient } from "./api";
+import type { CreatePatientBody, UpdatePatientBody } from "./types";
 
 export const patientKeys = {
   all: ["patients"] as const,
@@ -40,6 +40,18 @@ export function useCreatePatient() {
     mutationFn: (body: CreatePatientBody) => createPatient(body),
     onSuccess: (patient) => {
       queryClient.setQueryData(patientKeys.detail(patient.id), patient);
+      void queryClient.invalidateQueries({ queryKey: patientKeys.searches });
+    },
+  });
+}
+
+export function useUpdatePatient(patientId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdatePatientBody) => updatePatient(patientId, body),
+    onSuccess: (patient) => {
+      queryClient.setQueryData(patientKeys.detail(patient.id), patient);
+      // A name, phone or status change moves the patient in (or out of) search results.
       void queryClient.invalidateQueries({ queryKey: patientKeys.searches });
     },
   });

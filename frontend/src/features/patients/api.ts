@@ -1,6 +1,6 @@
 import { api } from "../../api";
 import type { Visit } from "../visits/types";
-import type { CreatePatientBody, Patient } from "./types";
+import type { CreatePatientBody, Patient, UpdatePatientBody } from "./types";
 
 /**
  * GET /api/v1/patients?search=&limit= → { patients }. Active patients
@@ -37,5 +37,14 @@ export async function fetchPatientVisits(patientId: string, signal?: AbortSignal
 /** POST /api/v1/patients → 201 { patient }. Reception only. */
 export async function createPatient(body: CreatePatientBody): Promise<Patient> {
   const { patient } = await api.post<{ patient: Patient }>("/api/v1/patients", body);
+  return patient;
+}
+
+/**
+ * PATCH /api/v1/patients/:id with only the changed fields → { patient }.
+ * Reception only. Also deactivates/reactivates via status (no delete).
+ */
+export async function updatePatient(patientId: string, body: UpdatePatientBody): Promise<Patient> {
+  const { patient } = await api.patch<{ patient: Patient }>(`/api/v1/patients/${encodeURIComponent(patientId)}`, body);
   return patient;
 }

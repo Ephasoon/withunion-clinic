@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createPatient, searchPatients } from "./patients/api";
+import { createPatient, searchPatients, updatePatient } from "./patients/api";
 import { createVisit, transitionVisit } from "./visits/api";
 
 /** Checks the exact requests the feature API functions send, against docs/api-inventory.md §5.3–5.4. */
@@ -44,6 +44,49 @@ describe("createPatient — POST /api/v1/patients", () => {
       url: "/api/v1/patients",
       method: "POST",
       body: { fullName: "Amina", gender: "female", dateOfBirth: "1990-05-14" },
+    });
+  });
+});
+
+describe("updatePatient — PATCH /api/v1/patients/:id", () => {
+  it("sends only the given fields, with the session cookie", async () => {
+    const fetchMock = stubFetch({ patient: { id: "p1" } });
+    await updatePatient("p1", { status: "inactive" });
+    expect(call(fetchMock)).toEqual({ url: "/api/v1/patients/p1", method: "PATCH", body: { status: "inactive" } });
+    expect(fetchMock.mock.calls[0]![1]?.credentials).toBe("include");
+  });
+
+  it('sends a cleared field as "" and dateOfBirth as a plain string', async () => {
+    const fetchMock = stubFetch({ patient: { id: "p1" } });
+    await updatePatient("p1", { phone: "", dateOfBirth: "1985-01-01" });
+    expect(call(fetchMock).body).toEqual({ phone: "", dateOfBirth: "1985-01-01" });
+  });
+
+  it("encodes the id in the path", async () => {
+    const fetchMock = stubFetch({ patient: { id: "a/b" } });
+    await updatePatient("a/b", { notes: "x" });
+    expect(call(fetchMock).url).toBe("/api/v1/patients/a%2Fb");
+  });
+
+  it("returns the updated patient, and surfaces PATIENT_PHONE_ALREADY_EXISTS with its details", async () => {
+    const patient = { id: "p1", status: "inactive" };
+    stubFetch({ patient });
+    await expect(updatePatient("p1", { status: "inactive" })).resolves.toEqual(patient);
+
+    const details = { patientId: "p2", patientCode: "WU-000002", fullName: "Abebe" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({ data: null, error: { code: "PATIENT_PHONE_ALREADY_EXISTS", message: "x", details }, meta: null }),
+          { status: 409, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+    await expect(updatePatient("p1", { phone: "0911" })).rejects.toMatchObject({
+      status: 409,
+      code: "PATIENT_PHONE_ALREADY_EXISTS",
+      details,
     });
   });
 });

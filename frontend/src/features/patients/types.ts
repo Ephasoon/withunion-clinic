@@ -5,6 +5,9 @@ export type Gender = (typeof GENDERS)[number];
 
 export const GENDER_LABELS: Record<Gender, string> = { male: "Male", female: "Female", other: "Other" };
 
+export const PATIENT_STATUSES = ["active", "inactive"] as const;
+export type PatientStatus = (typeof PATIENT_STATUSES)[number];
+
 export interface Patient {
   id: string;
   /** "WU-000123" */
@@ -18,7 +21,7 @@ export interface Patient {
   address: string | null;
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
-  status: "active" | "inactive";
+  status: PatientStatus;
   notes: string | null;
   createdBy: string;
   createdAt: string;
@@ -37,3 +40,9 @@ export interface CreatePatientBody {
   emergencyContactPhone?: string;
   notes?: string;
 }
+
+/**
+ * Body of PATCH /api/v1/patients/:id (docs §5.3): every create field
+ * optional, plus status. Strict; no field accepts null (docs §7.6).
+ */
+export type UpdatePatientBody = Partial<CreatePatientBody> & { status?: PatientStatus };

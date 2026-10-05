@@ -8,6 +8,7 @@ describe("featureRoutes — Reception + Visits", () => {
     expect(rolesFor("patients")).toEqual(["reception", "owner"]);
     expect(rolesFor("patients/new")).toEqual(["reception"]);
     expect(rolesFor("patients/:patientId")).toEqual(["reception", "owner"]);
+    expect(rolesFor("patients/:patientId/edit")).toEqual(["reception"]);
     expect(rolesFor("visits/today")).toEqual(["reception", "owner"]);
     expect(rolesFor("visits/:visitId")).toEqual(["reception", "owner"]);
     expect(rolesFor("nursing/queue")).toEqual(["nurse", "owner"]);
