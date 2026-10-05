@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { isApiError } from "../../api";
 import { patientKeys } from "../patients/queries";
 import { createVisit, fetchTodayVisits, fetchVisit, transitionVisit } from "./api";
 
@@ -39,7 +40,13 @@ export function useCreateVisit(patientId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => createVisit(patientId),
-    onSettled: (visit) => invalidateAfterVisitChange(queryClient, visit?.id, patientId),
+    onSettled: (visit, error) => {
+      invalidateAfterVisitChange(queryClient, visit?.id, patientId);
+      // Made inactive elsewhere since this page loaded: refetch so the page shows it.
+      if (isApiError(error) && error.code === "PATIENT_INACTIVE") {
+        void queryClient.invalidateQueries({ queryKey: patientKeys.detail(patientId) });
+      }
+    },
   });
 }
 

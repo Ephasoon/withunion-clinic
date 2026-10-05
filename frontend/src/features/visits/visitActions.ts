@@ -42,6 +42,30 @@ export function allowedVisitActions(role: string, status: VisitStatus): VisitAct
   return [];
 }
 
+/** The patient's visit history as the patient page has it. */
+export type VisitHistoryState = { status: "pending" } | { status: "error" } | { status: "success"; visits: Visit[] };
+
+/**
+ * What the "New visit" panel offers:
+ * - inactive: no Create visit button — POST /visits refuses an inactive
+ *   patient (PATIENT_INACTIVE, docs §5.4) — whatever the history says;
+ * - checking: the history is still loading, so open visits aren't known yet;
+ * - ready: Create visit, needing a second click when there are open visits
+ *   or the history couldn't be loaded (so open visits weren't checked).
+ */
+export type CreateVisitPanelState =
+  | { kind: "inactive" }
+  | { kind: "checking" }
+  | { kind: "ready"; openVisits: Visit[]; historyError: boolean; needsConfirmation: boolean };
+
+export function createVisitPanelState(patientStatus: "active" | "inactive", history: VisitHistoryState): CreateVisitPanelState {
+  if (patientStatus === "inactive") return { kind: "inactive" };
+  if (history.status === "pending") return { kind: "checking" };
+  const openVisits = history.status === "success" ? findOpenVisits(history.visits) : [];
+  const historyError = history.status === "error";
+  return { kind: "ready", openVisits, historyError, needsConfirmation: openVisits.length > 0 || historyError };
+}
+
 /** Visits in `visits` that are still in progress (not COMPLETED or CANCELLED). */
 export function findOpenVisits(visits: readonly Visit[]): Visit[] {
   return visits.filter((visit) => !isTerminalStatus(visit.status));

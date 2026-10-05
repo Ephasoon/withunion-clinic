@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ALL_ROLES } from "../../rbac/roles";
 import { VISIT_STATUSES, type Visit, type VisitStatus } from "./types";
-import { allowedVisitActions, findOpenVisits, isTerminalStatus, validateCancelReason } from "./visitActions";
+import {
+  allowedVisitActions,
+  createVisitPanelState,
+  findOpenVisits,
+  isTerminalStatus,
+  validateCancelReason,
+} from "./visitActions";
 
 const targets = (role: string, status: VisitStatus) => allowedVisitActions(role, status).map((a) => a.toStatus);
 
@@ -108,5 +114,56 @@ describe("validateCancelReason", () => {
     expect(validateCancelReason("x".repeat(2000))).toMatchObject({ ok: true });
     expect(validateCancelReason(` ${"x".repeat(2000)} `)).toMatchObject({ ok: true });
     expect(validateCancelReason("x".repeat(2001))).toMatchObject({ ok: false });
+  });
+});
+
+describe("createVisitPanelState", () => {
+  const visit = (id: string, status: VisitStatus): Visit => ({
+    id,
+    patientId: "p1",
+    patientCode: "WU-000001",
+    patientFullName: "A",
+    status,
+    createdBy: "u1",
+    createdAt: "2026-09-28T08:00:00.000Z",
+    completedAt: null,
+    cancelledAt: null,
+    cancelReason: null,
+  });
+
+  it("inactive patient: no Create visit, whatever the history says", () => {
+    expect(createVisitPanelState("inactive", { status: "success", visits: [] })).toEqual({ kind: "inactive" });
+    expect(createVisitPanelState("inactive", { status: "success", visits: [visit("a", "WITH_NURSE")] })).toEqual({
+      kind: "inactive",
+    });
+    expect(createVisitPanelState("inactive", { status: "pending" })).toEqual({ kind: "inactive" });
+    expect(createVisitPanelState("inactive", { status: "error" })).toEqual({ kind: "inactive" });
+  });
+
+  it("active patient with open visits: Create visit needs a second click", () => {
+    const open = visit("b", "WAITING_FOR_DOCTOR");
+    expect(
+      createVisitPanelState("active", { status: "success", visits: [visit("a", "COMPLETED"), open] })
+    ).toEqual({ kind: "ready", openVisits: [open], historyError: false, needsConfirmation: true });
+  });
+
+  it("active patient whose history failed to load: Create visit needs a second click", () => {
+    expect(createVisitPanelState("active", { status: "error" })).toEqual({
+      kind: "ready",
+      openVisits: [],
+      historyError: true,
+      needsConfirmation: true,
+    });
+  });
+
+  it("active patient with no open visits: a plain Create visit", () => {
+    expect(
+      createVisitPanelState("active", { status: "success", visits: [visit("a", "COMPLETED"), visit("b", "CANCELLED")] })
+    ).toEqual({ kind: "ready", openVisits: [], historyError: false, needsConfirmation: false });
+    expect(createVisitPanelState("active", { status: "success", visits: [] })).toMatchObject({ needsConfirmation: false });
+  });
+
+  it("active patient while the history loads: still checking", () => {
+    expect(createVisitPanelState("active", { status: "pending" })).toEqual({ kind: "checking" });
   });
 });

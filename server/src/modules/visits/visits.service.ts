@@ -2,7 +2,6 @@ import { PoolClient } from "pg";
 import { pool, withTransaction } from "../../config/db";
 import { AppError } from "../../utils/appError";
 import { canTransition, QUEUE_TRANSITIONS, Role } from "../roles/roles";
-import { getPatientById } from "../patients/patients.service";
 import { TERMINAL_STATUSES, VisitStatus } from "./visits.schema";
 
 export interface Visit {
@@ -85,13 +84,26 @@ const VISIT_SELECT = `
   JOIN patients p ON p.id = v.patient_id
 `;
 
+/**
+ * Only an active patient can be given a new visit (audit C3). The
+ * patient row is read inside the insert's transaction FOR SHARE, so a
+ * deactivation committing at the same moment waits for this insert (or
+ * this insert sees it) — the two can't interleave. Existing visits of a
+ * patient who becomes inactive are untouched and keep moving through
+ * their transitions; only creating a new one is refused.
+ */
 export async function createVisit(patientId: string, createdBy: string): Promise<Visit> {
-  const patient = await getPatientById(patientId);
-  if (!patient) {
-    throw new AppError(404, "NOT_FOUND", "Patient not found");
-  }
-
   return withTransaction(async (client: PoolClient) => {
+    const patient = await client.query<{ status: string }>(`SELECT status FROM patients WHERE id = $1 FOR SHARE`, [
+      patientId,
+    ]);
+    if (!patient.rows[0]) {
+      throw new AppError(404, "NOT_FOUND", "Patient not found");
+    }
+    if (patient.rows[0].status === "inactive") {
+      throw new AppError(409, "PATIENT_INACTIVE", "Patient is inactive. Reactivate the patient before creating a visit.");
+    }
+
     const insertVisit = await client.query<{ id: string }>(
       `INSERT INTO visits (patient_id, status, created_by) VALUES ($1, 'REGISTERED', $2) RETURNING id`,
       [patientId, createdBy]

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api";
-import { describeApiError, patientPhoneConflict, patientPhoneConflictMessage } from "./errorMessages";
+import {
+  describeApiError,
+  PATIENT_INACTIVE_MESSAGE,
+  patientPhoneConflict,
+  patientPhoneConflictMessage,
+} from "./errorMessages";
 
 describe("describeApiError", () => {
   it("VALIDATION_ERROR: body/query failures point to the fields", () => {
@@ -78,5 +83,15 @@ describe("PATIENT_PHONE_ALREADY_EXISTS", () => {
   it("is null for other errors", () => {
     expect(patientPhoneConflict(new ApiError(409, "PRICE_LIST_ITEM_ALREADY_EXISTS", "x", details))).toBeNull();
     expect(patientPhoneConflict(new Error("boom"))).toBeNull();
+  });
+});
+
+describe("PATIENT_INACTIVE", () => {
+  it("says the patient must be reactivated in Edit patient first", () => {
+    const error = new ApiError(409, "PATIENT_INACTIVE", "Patient is inactive. Reactivate the patient before creating a visit.");
+    expect(describeApiError(error)).toBe(
+      "This patient is inactive, so a new visit cannot be created. Reactivate the patient in Edit patient first."
+    );
+    expect(describeApiError(error)).toBe(PATIENT_INACTIVE_MESSAGE);
   });
 });

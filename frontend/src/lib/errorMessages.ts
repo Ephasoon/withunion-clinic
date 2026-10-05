@@ -22,6 +22,8 @@ export function describeApiError(error: unknown, options: { notFound?: string } 
       return error.message;
     case "NOT_FOUND":
       return options.notFound ?? error.message;
+    case "PATIENT_INACTIVE":
+      return PATIENT_INACTIVE_MESSAGE;
     case "PATIENT_PHONE_ALREADY_EXISTS": {
       const conflict = patientPhoneConflict(error);
       return conflict ? patientPhoneConflictMessage(conflict) : "This phone number already belongs to another patient.";
@@ -44,6 +46,10 @@ export function describeApiError(error: unknown, options: { notFound?: string } 
   if (error.status >= 500) return "The server is not responding. Please try again shortly.";
   return error.message;
 }
+
+/** POST /visits for an inactive patient (PATIENT_INACTIVE, docs §5.4); also the patient page's own notice. */
+export const PATIENT_INACTIVE_MESSAGE =
+  "This patient is inactive, so a new visit cannot be created. Reactivate the patient in Edit patient first.";
 
 /** The existing patient named in a PATIENT_PHONE_ALREADY_EXISTS error's details (docs §5.3). */
 export interface PatientPhoneConflict {

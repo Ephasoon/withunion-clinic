@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
+import { pool } from "../src/config/db";
 import { seedTestUsers, closeTestPool, createTestPatient, TEST_PASSWORD } from "./setup";
 
 const app = createApp();
@@ -355,5 +356,117 @@ describe("GET /api/v1/visits/today", () => {
     const nurse = await loginAs("test.nurse");
     const res = await nurse.get("/api/v1/visits/today");
     expect(res.body.data.visits.some((v: { id: string }) => v.id === visitId)).toBe(true);
+  });
+});
+
+describe("POST /api/v1/visits — inactive patients (audit C3)", () => {
+  async function patientWithStatus(status: "active" | "inactive") {
+    const reception = await loginAs("test.reception");
+    const patient = await createTestPatient(`C3 Patient ${Date.now()}-${Math.random()}`);
+    if (status === "inactive") {
+      const res = await reception.patch(`/api/v1/patients/${patient.id}`).send({ status: "inactive" });
+      expect(res.status).toBe(200);
+    }
+    return { reception, patientId: patient.id };
+  }
+
+  const visitCount = async (patientId: string) =>
+    Number((await pool.query(`SELECT COUNT(*) AS n FROM visits WHERE patient_id = $1`, [patientId])).rows[0].n);
+
+  it("refuses an inactive patient with 409 PATIENT_INACTIVE and creates no visit, queue event or audit row", async () => {
+    const { reception, patientId } = await patientWithStatus("inactive");
+    const since = new Date();
+
+    const res = await reception.post("/api/v1/visits").send({ patientId });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("PATIENT_INACTIVE");
+    expect(res.body.error.message).toBe("Patient is inactive. Reactivate the patient before creating a visit.");
+
+    expect(await visitCount(patientId)).toBe(0);
+    const events = await pool.query(
+      `SELECT 1 FROM queue_events qe JOIN visits v ON v.id = qe.visit_id WHERE v.patient_id = $1`,
+      [patientId]
+    );
+    expect(events.rowCount).toBe(0);
+    const audits = await pool.query(
+      `SELECT 1 FROM audit_logs WHERE action = 'visit.create' AND created_at >= $1 AND after_value->>'patientId' = $2`,
+      [since, patientId]
+    );
+    expect(audits.rowCount).toBe(0);
+  });
+
+  it("an active patient can still be given a visit", async () => {
+    const { reception, patientId } = await patientWithStatus("active");
+    const res = await reception.post("/api/v1/visits").send({ patientId });
+    expect(res.status).toBe(201);
+    expect(res.body.data.visit.status).toBe("REGISTERED");
+    expect(await visitCount(patientId)).toBe(1);
+  });
+
+  it("an unknown patient is still 404, not PATIENT_INACTIVE", async () => {
+    const reception = await loginAs("test.reception");
+    const res = await reception.post("/api/v1/visits").send({ patientId: "00000000-0000-0000-0000-000000000000" });
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("NOT_FOUND");
+    expect(res.body.error.message).toBe("Patient not found");
+  });
+
+  it("reactivating the patient (PATCH status active) makes visit creation work again", async () => {
+    const { reception, patientId } = await patientWithStatus("inactive");
+    expect((await reception.post("/api/v1/visits").send({ patientId })).status).toBe(409);
+
+    const reactivate = await reception.patch(`/api/v1/patients/${patientId}`).send({ status: "active" });
+    expect(reactivate.status).toBe(200);
+
+    const res = await reception.post("/api/v1/visits").send({ patientId });
+    expect(res.status).toBe(201);
+    expect(await visitCount(patientId)).toBe(1);
+  });
+
+  it("an open visit of a patient later set inactive is unchanged and still moves through its transitions to completion", async () => {
+    const { reception, patientId } = await patientWithStatus("active");
+    const visitId = (await reception.post("/api/v1/visits").send({ patientId })).body.data.visit.id as string;
+
+    expect((await reception.patch(`/api/v1/patients/${patientId}`).send({ status: "inactive" })).status).toBe(200);
+
+    const unchanged = await reception.get(`/api/v1/visits/${visitId}`);
+    expect(unchanged.status).toBe(200);
+    expect(unchanged.body.data.visit.status).toBe("REGISTERED");
+    expect(unchanged.body.data.history).toHaveLength(1);
+
+    let res = await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WAITING_FOR_NURSE" });
+    expect(res.status).toBe(200);
+    const nurse = await loginAs("test.nurse");
+    res = await nurse.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WITH_NURSE" });
+    expect(res.body.data.visit.status).toBe("WITH_NURSE");
+    res = await nurse.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WAITING_FOR_DOCTOR" });
+    expect(res.body.data.visit.status).toBe("WAITING_FOR_DOCTOR");
+
+    const doctor = await loginAs("test.doctor");
+    const consultRes = await doctor.post(`/api/v1/visits/${visitId}/consultations`);
+    expect(consultRes.status).toBe(201);
+    res = await doctor.post(`/api/v1/consultations/${consultRes.body.data.consultation.id}/complete`);
+    expect(res.body.data.visitStatus).toBe("WAITING_FOR_BILLING");
+
+    const invRes = await reception.post(`/api/v1/billing/visits/${visitId}/invoice`);
+    expect(invRes.status).toBe(201);
+    const completeRes = await reception.post(`/api/v1/billing/invoices/${invRes.body.data.invoice.id}/complete`);
+    expect(completeRes.body.data.visitStatus).toBe("COMPLETED");
+
+    // The patient is still inactive, and still can't be given a new visit.
+    expect((await reception.get(`/api/v1/patients/${patientId}`)).body.data.patient.status).toBe("inactive");
+    expect((await reception.post("/api/v1/visits").send({ patientId })).status).toBe(409);
+  });
+
+  it("an open visit of an inactive patient can still be cancelled", async () => {
+    const { reception, patientId } = await patientWithStatus("active");
+    const visitId = (await reception.post("/api/v1/visits").send({ patientId })).body.data.visit.id as string;
+    await reception.patch(`/api/v1/patients/${patientId}`).send({ status: "inactive" });
+
+    const res = await reception
+      .post(`/api/v1/visits/${visitId}/transition`)
+      .send({ toStatus: "CANCELLED", reason: "Patient left" });
+    expect(res.status).toBe(200);
+    expect(res.body.data.visit.status).toBe("CANCELLED");
   });
 });

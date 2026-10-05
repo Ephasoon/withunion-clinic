@@ -323,8 +323,8 @@ PatientHistoryVisit = Visit & {
 
 #### `POST /api/v1/visits` — reception
 - **Body** (`CreateVisitSchema`): `{ patientId: uuid }`
-- **201** `{ data: { visit: Visit } }` (status `REGISTERED`, one queue event). No check that the patient is active or has no open visit.
-- Errors: `NOT_FOUND` 404 "Patient not found".
+- **201** `{ data: { visit: Visit } }` (status `REGISTERED`, one queue event). The patient must be active; there is no check that the patient has no open visit.
+- Errors (in order, both checked inside the insert's transaction, the patient row read `FOR SHARE`): `NOT_FOUND` 404 "Patient not found"; `PATIENT_INACTIVE` 409 "Patient is inactive. Reactivate the patient before creating a visit." — no visit, queue event or audit row is written. Only **new** visits are refused: a patient's existing visits are untouched when the patient is made inactive and keep moving through every transition (including billing completion and cancellation).
 
 #### `GET /api/v1/visits/today` — any
 - **200** `{ data: { visits: Visit[] } }` — role-scoped, created-today only (section 3.4).
@@ -696,6 +696,7 @@ Billing's saved answers to "which price-list item is this medicine / lab test ch
 | `RECEIPT_NOT_AVAILABLE_UNTIL_PAID` | 409 | "Receipts are only available once the invoice is fully paid (currently OPEN)" | `receipts/receipts.service.ts` | receipt for OPEN invoice |
 | `INVALID_INVENTORY_ITEM` | 400 | "Inventory item X does not exist" | `purchases/purchases.service.ts` | purchase line with unknown item |
 | `PURCHASE_ALREADY_RECEIVED` | 409 | "Purchase is already RECEIVED" | `purchases/purchases.service.ts` | second receive |
+| `PATIENT_INACTIVE` | 409 | "Patient is inactive. Reactivate the patient before creating a visit." | `visits/visits.service.ts` | `POST /visits` for a patient whose `status` is `inactive` |
 | `PATIENT_PHONE_ALREADY_EXISTS` | 409 | "This phone number already belongs to <fullName> (<patientCode>)" + `details: { patientId, patientCode, fullName }` | `patients/patients.service.ts` | POST, or a PATCH that changes the phone, with a number (normalized) that another patient — active or inactive — already has |
 | `PRICE_LIST_ITEM_ALREADY_EXISTS` | 409 | "A price list item named \"x\" already exists" | `price-list/price-list.service.ts` | duplicate normalized name on create, or rename onto another item's name |
 | `PRICE_LIST_ITEM_INACTIVE` | 409 | "This price list item is inactive and can't be linked" | `charge-links/charge-links.service.ts` | `PUT /charge-links` naming an inactive price-list item |
