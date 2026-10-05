@@ -5,16 +5,17 @@ import type { CreatePatientBody, UpdatePatientBody } from "./types";
 export const patientKeys = {
   all: ["patients"] as const,
   searches: ["patients", "search"] as const,
-  search: (search: string, limit: number) => ["patients", "search", { search, limit }] as const,
+  search: (search: string, limit: number, includeInactive: boolean) =>
+    ["patients", "search", { search, limit, includeInactive }] as const,
   detail: (patientId: string) => ["patients", "detail", patientId] as const,
   visits: (patientId: string) => ["patients", "visits", patientId] as const,
 };
 
-export function usePatientSearch(search: string, limit: number) {
+export function usePatientSearch(search: string, limit: number, includeInactive = false) {
   const term = search.trim();
   return useQuery({
-    queryKey: patientKeys.search(term, limit),
-    queryFn: ({ signal }) => searchPatients({ search: term, limit }, signal),
+    queryKey: patientKeys.search(term, limit, includeInactive),
+    queryFn: ({ signal }) => searchPatients({ search: term, limit, includeInactive }, signal),
     // Keep showing the previous results while the next search loads.
     placeholderData: keepPreviousData,
   });

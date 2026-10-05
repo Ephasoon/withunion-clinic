@@ -143,11 +143,22 @@ export async function createPatient(input: CreatePatientInput, createdBy: string
  * already registered?" candidates without the system auto-merging
  * anything. Returns candidates for a human to decide — never
  * silently treats two rows as the same patient.
+ *
+ * Active patients only, unless includeInactive: then inactive patients
+ * are listed too, every active match before every inactive one, each
+ * group in the usual order.
  */
-export async function searchPatients(search: string | undefined, limit: number): Promise<Patient[]> {
+export async function searchPatients(
+  search: string | undefined,
+  limit: number,
+  includeInactive = false
+): Promise<Patient[]> {
+  const statusFilter = includeInactive ? "TRUE" : "status = 'active'";
+  const activeFirst = includeInactive ? "(status = 'active') DESC, " : "";
+
   if (!search) {
     const result = await pool.query<PatientRow>(
-      `SELECT * FROM patients WHERE status = 'active' ORDER BY created_at DESC LIMIT $1`,
+      `SELECT * FROM patients WHERE ${statusFilter} ORDER BY ${activeFirst}created_at DESC LIMIT $1`,
       [limit]
     );
     return result.rows.map(toPatient);
@@ -158,12 +169,12 @@ export async function searchPatients(search: string | undefined, limit: number):
     `SELECT *,
             CASE WHEN $2 <> '' AND phone LIKE '%' || $2 || '%' THEN 0 ELSE 1 END AS match_rank
      FROM patients
-     WHERE status = 'active'
+     WHERE ${statusFilter}
        AND (
          ($2 <> '' AND phone LIKE '%' || $2 || '%')
          OR full_name ILIKE '%' || $1 || '%'
        )
-     ORDER BY match_rank ASC, full_name ASC
+     ORDER BY ${activeFirst}match_rank ASC, full_name ASC
      LIMIT $3`,
     [search, digitsOnly, limit]
   );

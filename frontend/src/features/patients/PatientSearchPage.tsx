@@ -7,29 +7,41 @@ import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { hasRole } from "../../rbac/access";
 import { ROLES } from "../../rbac/roles";
 import { patientAgeText } from "./patientDisplay";
+import { PatientStatusBadge } from "./PatientFields";
+import {
+  patientSearchEmptyText,
+  patientSearchHelperText,
+  patientSearchParams,
+  readPatientSearchParams,
+} from "./patientSearchState";
 import { usePatientSearch } from "./queries";
 import { GENDER_LABELS } from "./types";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
-/** GET /patients?search=&limit= — active patients only, no pagination. */
+/** GET /patients?search=&limit=&includeInactive= — active patients only unless the box is ticked; no pagination. */
 export function PatientSearchPage() {
   const auth = useAuth();
   const user = auth.status === "authenticated" ? auth.user : null;
   const canRegister = hasRole(user, ROLES.RECEPTION);
 
-  // The search term lives in the URL so Back returns to the same results.
+  // The search term and "Include inactive" live in the URL so Back and reload return to the same results.
   const [searchParams, setSearchParams] = useSearchParams();
-  const term = searchParams.get("q") ?? "";
+  const { term, includeInactive } = readPatientSearchParams(searchParams);
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const debouncedTerm = useDebouncedValue(term, 300);
-  const search = usePatientSearch(debouncedTerm, limit);
+  const search = usePatientSearch(debouncedTerm, limit, includeInactive);
   const today = todayIsoDate();
 
   const onTermChange = (value: string) => {
     setLimit(DEFAULT_LIMIT);
-    setSearchParams(value === "" ? {} : { q: value }, { replace: true });
+    setSearchParams(patientSearchParams({ term: value, includeInactive }), { replace: true });
+  };
+
+  const onIncludeInactiveChange = (checked: boolean) => {
+    setLimit(DEFAULT_LIMIT);
+    setSearchParams(patientSearchParams({ term, includeInactive: checked }), { replace: true });
   };
 
   const patients = search.data ?? [];
@@ -63,9 +75,16 @@ export function PatientSearchPage() {
           placeholder="e.g. Amina or 0911"
           className="mt-1 block w-full max-w-lg rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
         />
-        <p className="mt-1 text-xs text-slate-500">
-          Only active patients are listed. {searching ? "" : "With no search, the newest registrations are shown."}
-        </p>
+        <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            name="includeInactive"
+            checked={includeInactive}
+            onChange={(e) => onIncludeInactiveChange(e.target.checked)}
+          />
+          Include inactive patients
+        </label>
+        <p className="mt-1 text-xs text-slate-500">{patientSearchHelperText(includeInactive, searching)}</p>
       </div>
 
       {search.isPending ? (
@@ -74,7 +93,7 @@ export function PatientSearchPage() {
         <ErrorState error={search.error} onRetry={() => void search.refetch()} />
       ) : patients.length === 0 ? (
         <EmptyState>
-          {searching ? `No active patients match “${debouncedTerm.trim()}”.` : "No patients have been registered yet."}
+          {patientSearchEmptyText(debouncedTerm, includeInactive)}
           {canRegister && (
             <>
               {" "}
@@ -102,9 +121,12 @@ export function PatientSearchPage() {
                   <tr key={patient.id} className="hover:bg-slate-50">
                     <td className="whitespace-nowrap px-4 py-2 font-mono text-xs text-slate-600">{patient.patientCode}</td>
                     <td className="px-4 py-2">
-                      <Link to={`/patients/${patient.id}`} className="font-medium text-slate-900 hover:underline">
-                        {patient.fullName}
-                      </Link>
+                      <span className="flex flex-wrap items-center gap-2">
+                        <Link to={`/patients/${patient.id}`} className="font-medium text-slate-900 hover:underline">
+                          {patient.fullName}
+                        </Link>
+                        <PatientStatusBadge status={patient.status} />
+                      </span>
                     </td>
                     <td className="px-4 py-2 text-slate-700">{GENDER_LABELS[patient.gender]}</td>
                     <td className="px-4 py-2 text-slate-700">{patientAgeText(patient, today)}</td>

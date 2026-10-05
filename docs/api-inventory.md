@@ -293,8 +293,9 @@ PatientHistoryVisit = Visit & {
 - Audits `patient.create` (after value).
 
 #### `GET /api/v1/patients` — any
-- **Query** (`SearchPatientsQuerySchema`, not strict): `search?: string (trim, ≤255)`, `limit?: int 1–100, default 20`.
-- **200** `{ data: { patients: Patient[] } }` — **only `status = 'active'`**. No `search`: newest first. With `search`: phone contains the digits of `search` (ranked first) OR `fullName ILIKE %search%`, then by name. No offset/total.
+- **Query** (`SearchPatientsQuerySchema`, not strict — unknown keys are ignored): `search?: string (trim, ≤255)`, `limit?: int 1–100, default 20`, `includeInactive?: "true" | "false"` (default `false`; any other value, including `""`, `"1"`, `"TRUE"` or a repeated key, → `VALIDATION_ERROR` 400 with `details.includeInactive`).
+- **200** `{ data: { patients: Patient[] } }` — **only `status = 'active'`** by default (or with `includeInactive=false`). No `search`: newest first. With `search`: phone contains the digits of `search` (ranked first) OR `fullName ILIKE %search%`, then by name. No offset/total.
+- With `includeInactive=true`: inactive patients are included too (each `Patient` carries its `status`). Same matching and `limit`; every active patient is listed before every inactive one, each group in the order above. Same roles as without it (any authenticated user).
 - Errors: standard only.
 
 #### `GET /api/v1/patients/:id` — any

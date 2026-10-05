@@ -34,6 +34,27 @@ describe("searchPatients — GET /api/v1/patients", () => {
     await searchPatients({ search: "   ", limit: 100 });
     expect(call(fetchMock).url).toBe("/api/v1/patients?limit=100");
   });
+
+  it("sends includeInactive=true only when the box is ticked", async () => {
+    const fetchMock = stubFetch({ patients: [] });
+    await searchPatients({ search: "amina", limit: 20, includeInactive: true });
+    expect(call(fetchMock).url).toBe("/api/v1/patients?search=amina&limit=20&includeInactive=true");
+  });
+
+  it("leaves includeInactive out when unticked or omitted (the backend default is active only)", async () => {
+    const fetchMock = stubFetch({ patients: [] });
+    await searchPatients({ search: "amina", limit: 20, includeInactive: false });
+    expect(call(fetchMock).url).toBe("/api/v1/patients?search=amina&limit=20");
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ data: { patients: [] }, error: null, meta: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    await searchPatients({ search: "", limit: 20 });
+    expect(call(fetchMock).url).toBe("/api/v1/patients?limit=20");
+  });
 });
 
 describe("createPatient — POST /api/v1/patients", () => {

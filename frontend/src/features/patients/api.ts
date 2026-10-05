@@ -3,16 +3,22 @@ import type { Visit } from "../visits/types";
 import type { CreatePatientBody, Patient, UpdatePatientBody } from "./types";
 
 /**
- * GET /api/v1/patients?search=&limit= → { patients }. Active patients
- * only; no search = newest first. Limit 1–100, no offset or total.
+ * GET /api/v1/patients?search=&limit=&includeInactive= → { patients }.
+ * Active patients only, unless includeInactive (then active ones come
+ * first); no search = newest first. Limit 1–100, no offset or total.
+ * includeInactive is sent only when true — the backend's default is false.
  */
 export async function searchPatients(
-  params: { search: string; limit: number },
+  params: { search: string; limit: number; includeInactive?: boolean },
   signal?: AbortSignal
 ): Promise<Patient[]> {
   const search = params.search.trim();
   const { patients } = await api.get<{ patients: Patient[] }>("/api/v1/patients", {
-    query: { search: search === "" ? undefined : search, limit: params.limit },
+    query: {
+      search: search === "" ? undefined : search,
+      limit: params.limit,
+      includeInactive: params.includeInactive ? "true" : undefined,
+    },
     signal,
   });
   return patients;

@@ -49,9 +49,16 @@ export const UpdatePatientSchema = z
 
 export type UpdatePatientInput = z.infer<typeof UpdatePatientSchema>;
 
+/**
+ * Not strict: unknown query keys are ignored (approved decision, kept
+ * when includeInactive was added). includeInactive accepts exactly
+ * "true" or "false" — anything else is a VALIDATION_ERROR — and is
+ * false when omitted (active patients only).
+ */
 export const SearchPatientsQuerySchema = z.object({
   search: z.string().trim().max(255).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+  includeInactive: z.enum(["true", "false"], { message: 'includeInactive must be "true" or "false"' }).optional(),
 });
 
 export type SearchPatientsQuery = z.infer<typeof SearchPatientsQuerySchema>;

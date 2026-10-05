@@ -63,7 +63,7 @@ patientsRouter.get(
   async (req, res, next) => {
     try {
       const query = (req as unknown as { validatedQuery: SearchPatientsQuery }).validatedQuery;
-      const patients = await searchPatients(query.search, query.limit);
+      const patients = await searchPatients(query.search, query.limit, query.includeInactive === "true");
       res.json({ data: { patients }, error: null, meta: null });
     } catch (err) {
       next(err);

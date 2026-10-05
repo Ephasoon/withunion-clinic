@@ -576,3 +576,107 @@ describe("PATCH /api/v1/patients/:id — status changes and audit actions", () =
     expect(byId.body.data.patient.status).toBe("inactive");
   });
 });
+
+describe("GET /api/v1/patients — includeInactive", () => {
+  /** Registers one active and one inactive patient sharing a unique name token; the inactive one sorts first by name. */
+  async function activeAndInactive() {
+    const reception = await loginAs("test.reception");
+    const token = `IncInact${Date.now()}${randomInt(1_000_000)}`;
+    const inactivePhone = uniquePhone();
+    const inactive = (
+      await reception
+        .post("/api/v1/patients")
+        .send({ fullName: `${token} Aaa Inactive`, gender: "male", approximateAge: 30, phone: inactivePhone })
+    ).body.data.patient;
+    const active = (
+      await reception.post("/api/v1/patients").send({ fullName: `${token} Zzz Active`, gender: "female", approximateAge: 31 })
+    ).body.data.patient;
+    expect((await reception.patch(`/api/v1/patients/${inactive.id}`).send({ status: "inactive" })).status).toBe(200);
+    return { reception, token, inactive, active, inactivePhone };
+  }
+  const ids = (res: request.Response) => res.body.data.patients.map((p: { id: string }) => p.id);
+
+  it("by default an inactive patient is not listed", async () => {
+    const { reception, token, inactive, active } = await activeAndInactive();
+    const res = await reception.get("/api/v1/patients").query({ search: token });
+    expect(res.status).toBe(200);
+    expect(ids(res)).toEqual([active.id]);
+    expect(ids(res)).not.toContain(inactive.id);
+  });
+
+  it("includeInactive=true lists it, with its status", async () => {
+    const { reception, token, inactive } = await activeAndInactive();
+    const res = await reception.get("/api/v1/patients").query({ search: token, includeInactive: "true" });
+    expect(res.status).toBe(200);
+    const found = res.body.data.patients.find((p: { id: string }) => p.id === inactive.id);
+    expect(found?.status).toBe("inactive");
+  });
+
+  it("includeInactive=false behaves exactly like the default", async () => {
+    const { reception, token, active } = await activeAndInactive();
+    const asDefault = await reception.get("/api/v1/patients").query({ search: token });
+    const asFalse = await reception.get("/api/v1/patients").query({ search: token, includeInactive: "false" });
+    expect(asFalse.status).toBe(200);
+    expect(asFalse.body).toEqual(asDefault.body);
+    expect(ids(asFalse)).toEqual([active.id]);
+  });
+
+  it("an invalid includeInactive value is 400 VALIDATION_ERROR", async () => {
+    const reception = await loginAs("test.reception");
+    for (const value of ["yes", "1", "0", "TRUE", "True", ""]) {
+      const res = await reception.get("/api/v1/patients").query({ includeInactive: value });
+      expect(res.status, JSON.stringify(value)).toBe(400);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+      expect(res.body.error.details.includeInactive).toBeDefined();
+    }
+    const repeated = await reception.get("/api/v1/patients?includeInactive=true&includeInactive=true");
+    expect(repeated.status).toBe(400);
+  });
+
+  it("name and phone search work with the option on", async () => {
+    const { reception, token, inactive, inactivePhone } = await activeAndInactive();
+    const byName = await reception.get("/api/v1/patients").query({ search: `${token} Aaa`, includeInactive: "true" });
+    expect(ids(byName)).toEqual([inactive.id]);
+
+    const byPhone = await reception.get("/api/v1/patients").query({ search: inactivePhone, includeInactive: "true" });
+    expect(ids(byPhone)).toContain(inactive.id);
+    const byPhoneDefault = await reception.get("/api/v1/patients").query({ search: inactivePhone });
+    expect(ids(byPhoneDefault)).not.toContain(inactive.id);
+  });
+
+  it("lists active patients before inactive ones, then in the usual order", async () => {
+    const { reception, token, inactive, active } = await activeAndInactive();
+    // By name alone the inactive "… Aaa …" would come first; active-first puts "… Zzz …" ahead of it.
+    const res = await reception.get("/api/v1/patients").query({ search: token, includeInactive: "true" });
+    expect(ids(res)).toEqual([active.id, inactive.id]);
+
+    // Without a search term (newest first): no active patient appears after an inactive one.
+    const newest = await reception.get("/api/v1/patients").query({ includeInactive: "true", limit: 100 });
+    const statuses: string[] = newest.body.data.patients.map((p: { status: string }) => p.status);
+    const firstInactive = statuses.indexOf("inactive");
+    if (firstInactive !== -1) expect(statuses.slice(firstInactive).every((s) => s === "inactive")).toBe(true);
+  });
+
+  it("keeps the limit when the option is on", async () => {
+    const reception = await loginAs("test.reception");
+    const res = await reception.get("/api/v1/patients").query({ includeInactive: "true", limit: 2 });
+    expect(res.status).toBe(200);
+    expect(res.body.data.patients.length).toBeLessThanOrEqual(2);
+  });
+
+  it("is available to the roles that could already search (e.g. pharmacy), and still needs a session", async () => {
+    const { token, inactive } = await activeAndInactive();
+    const pharmacy = await loginAs("test.pharmacy");
+    const res = await pharmacy.get("/api/v1/patients").query({ search: token, includeInactive: "true" });
+    expect(res.status).toBe(200);
+    expect(ids(res)).toContain(inactive.id);
+    expect((await request(app).get("/api/v1/patients").query({ includeInactive: "true" })).status).toBe(401);
+  });
+
+  it("unknown query keys are still ignored (the query schema is not strict)", async () => {
+    const { reception, token, active } = await activeAndInactive();
+    const res = await reception.get("/api/v1/patients").query({ search: token, notARealParam: "x" });
+    expect(res.status).toBe(200);
+    expect(ids(res)).toEqual([active.id]);
+  });
+});
