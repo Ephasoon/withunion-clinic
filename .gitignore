@@ -4,3 +4,11 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Environment files (real values). Only the *.example templates are tracked.
+.env.*
+!.env.example
+!.env.production.example
+
+# Local backup output, if anyone points BACKUP_DIR inside the repo.
+backups/

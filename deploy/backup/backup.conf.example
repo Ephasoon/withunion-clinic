@@ -1,0 +1,24 @@
+# Settings for deploy/backup/backup.sh and restore.sh.
+# Install as /etc/withunion-clinic/backup.conf (see docs/deployment.md).
+# Shell syntax: NAME=value, no spaces around "=".
+
+# Where the project lives on the server.
+APP_DIR=/opt/withunion-clinic
+
+# Local backup folder (outside the project, readable only by its owner).
+BACKUP_DIR=/var/backups/withunion-clinic
+
+# age PUBLIC key(s) that backups are encrypted to, one per line
+# (made with age-keygen; the PRIVATE key stays OFF this server).
+AGE_RECIPIENTS_FILE=/etc/withunion-clinic/backup-recipients.txt
+
+# How many backups to keep. With one backup a night, 14 = two weeks.
+KEEP_BACKUPS=14
+
+# OFF-SITE COPY (optional). Leave empty to keep backups on this server only.
+# Backups contain patient data and must stay in Ethiopia: use only a
+# machine you control inside Ethiopia, reached over SSH with a key, e.g.
+#   OFFSITE_RSYNC_TARGET=backup@192.0.2.10:/srv/withunion-backups/
+#   OFFSITE_SSH_OPTS="-i /home/clinic/.ssh/offsite_backup -p 22"
+OFFSITE_RSYNC_TARGET=
+OFFSITE_SSH_OPTS=

@@ -1,0 +1,9 @@
+# Nightly database backup for WithUnion Clinic - EXAMPLE, not installed.
+#
+# Install for the deploy user (the one in the docker group) with:
+#   crontab -e
+# and paste the line below. The server's clock is UTC unless you changed
+# it; 23:30 UTC is 02:30 in Addis Ababa, when the clinic is closed.
+#
+# m  h  dom mon dow  command
+30 23 *   *   *    /opt/withunion-clinic/deploy/backup/backup.sh >> /var/log/withunion-clinic/backup.log 2>&1

@@ -19,7 +19,9 @@ const EnvSchema = z.object({
   SESSION_COOKIE_NAME: z.string().default("wu_clinic_sid"),
   SESSION_MAX_AGE_MS: z.coerce.number().int().positive().default(8 * 60 * 60 * 1000),
 
-  CORS_ORIGIN: z.string().default("http://localhost:5173"),
+  // Optional here so production can tell "missing" from "defaulted"
+  // (see the refinement below); development falls back to Vite's origin.
+  CORS_ORIGIN: z.string().min(1).optional(),
 
   LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
@@ -32,7 +34,34 @@ const EnvSchema = z.object({
   CLINIC_PHONE: z.string().default(""),
 });
 
-const parsed = EnvSchema.safeParse(process.env);
+/** The placeholder in server/.env.example — never a usable secret. */
+const EXAMPLE_SESSION_SECRET = "replace-this-with-a-long-random-value";
+
+/**
+ * Production must not boot on development fallbacks: CORS_ORIGIN has to
+ * be set explicitly, and SESSION_SECRET must be a real, long secret
+ * rather than the .env.example placeholder.
+ */
+const ProductionEnvSchema = EnvSchema.superRefine((e, ctx) => {
+  if (e.NODE_ENV !== "production") return;
+  if (!e.CORS_ORIGIN) {
+    ctx.addIssue({ code: "custom", path: ["CORS_ORIGIN"], message: "CORS_ORIGIN is required in production" });
+  }
+  if (e.SESSION_SECRET === EXAMPLE_SESSION_SECRET || e.SESSION_SECRET.length < 32) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["SESSION_SECRET"],
+      message: "SESSION_SECRET must be a random value of at least 32 characters in production",
+    });
+  }
+}).transform((e) => ({ ...e, CORS_ORIGIN: e.CORS_ORIGIN ?? "http://localhost:5173" }));
+
+/** Validates a set of environment variables; exported for tests. */
+export function parseEnv(source: NodeJS.ProcessEnv) {
+  return ProductionEnvSchema.safeParse(source);
+}
+
+const parsed = parseEnv(process.env);
 
 if (!parsed.success) {
   // Fail fast and loud at boot — never partially start with bad config.

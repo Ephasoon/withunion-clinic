@@ -1,0 +1,16 @@
+# Keep secrets, local builds, tests and VCS data out of every image
+# built from server/ (both Dockerfile.prod and the dev Dockerfile).
+.env
+.env.*
+!.env.example
+node_modules
+dist
+tests
+coverage
+scripts/run-tests.mjs
+vitest.config.ts
+*.log
+.git
+.gitignore
+.dockerignore
+Dockerfile*

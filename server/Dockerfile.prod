@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1
+#
+# Production image for the WithUnion Clinic API. Built by
+# docker-compose.prod.yml; the older ./Dockerfile belongs to the
+# development docker-compose.yml and is left as it was.
+#
+# Targets:
+#   runtime (default) - the API: compiled JS + production dependencies only.
+#   migrate           - one-shot `node-pg-migrate up`. The migrations are
+#                       TypeScript and run through tsx, both dev
+#                       dependencies, so this target keeps them; the
+#                       runtime image does not.
+# Both run as the unprivileged `node` user (uid 1000) from the base image.
+
+ARG NODE_IMAGE=node:22.21.1-bookworm-slim
+
+# ---- all dependencies (build + migrate) ----
+FROM ${NODE_IMAGE} AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+# ---- compile TypeScript ----
+FROM deps AS build
+COPY tsconfig.json ./
+COPY src ./src
+# The demo seed creates accounts with a shared password: never ship it.
+RUN npm run build && rm -f dist/db/seed.js dist/db/seed.js.map
+
+# ---- production dependencies only ----
+FROM ${NODE_IMAGE} AS prod-deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+
+# ---- one-shot migrations ----
+FROM ${NODE_IMAGE} AS migrate
+ENV NODE_ENV=production \
+    TZ=Africa/Addis_Ababa
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json ./
+COPY src/db/migrations ./src/db/migrations
+USER node
+# `up` applies only migrations not yet recorded in pgmigrations and takes
+# an advisory lock, so running it again (or twice at once) is harmless.
+CMD ["node", "--require", "tsx/cjs", "node_modules/node-pg-migrate/bin/node-pg-migrate.js", "up", \
+     "-j", "ts", "--migration-file-language", "ts", "-m", "src/db/migrations", "--database-url-var", "DATABASE_URL"]
+
+# ---- the API ----
+FROM ${NODE_IMAGE} AS runtime
+ENV NODE_ENV=production \
+    TZ=Africa/Addis_Ababa \
+    PORT=4000
+WORKDIR /app
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY package.json ./
+COPY --from=build /app/dist ./dist
+USER node
+EXPOSE 4000
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+CMD ["node", "dist/server.js"]

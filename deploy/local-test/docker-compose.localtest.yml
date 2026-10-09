@@ -1,0 +1,19 @@
+# Local rehearsal of the production stack on a developer machine.
+# NOT for the server. Layered on top of docker-compose.prod.yml:
+#
+#   docker compose -p withunion-localtest --env-file <test env file> \
+#     -f docker-compose.prod.yml -f deploy/local-test/docker-compose.localtest.yml up -d --build
+#
+# With DOMAIN=localhost, Caddy issues the certificate from its own local
+# CA instead of Let's Encrypt, so the real HTTPS path (Secure cookies,
+# HSTS, X-Forwarded-Proto) is exercised. Caddy listens on 18080/18443
+# inside the container too, so its HTTP->HTTPS redirect keeps the port.
+
+services:
+  caddy:
+    environment:
+      HTTP_PORT: "18080"
+      HTTPS_PORT: "18443"
+    ports: !override
+      - "127.0.0.1:18080:18080"
+      - "127.0.0.1:18443:18443"

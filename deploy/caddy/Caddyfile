@@ -1,0 +1,60 @@
+# WithUnion Clinic - public entry point.
+# Serves the built frontend from /srv and proxies the API on the same
+# origin, so the browser never makes a cross-origin request.
+# {$VAR} values come from the container environment (docker-compose.prod.yml).
+
+{
+	# Let's Encrypt account e-mail: expiry and problem notices go here.
+	email {$ACME_EMAIL}
+	# 80/443 in production. Only the local test overrides these, so that
+	# redirects keep its high port numbers.
+	http_port {$HTTP_PORT:80}
+	https_port {$HTTPS_PORT:443}
+}
+
+# A public domain gets a Let's Encrypt certificate automatically;
+# "localhost" gets one from Caddy's own local CA (local testing only).
+{$DOMAIN} {
+	encode zstd gzip
+
+	# `defer` applies these after the API's own (helmet) headers, so the
+	# values below are the ones the browser sees on every response.
+	header {
+		defer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+		-X-Powered-By
+	}
+
+	# The API. Caddy replaces any client-sent X-Forwarded-For with the real
+	# client address and sets X-Forwarded-Proto, which Express reads
+	# through `trust proxy` = 1 (secure cookies, rate limiting, audit IPs).
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+	handle /health {
+		reverse_proxy api:4000
+	}
+
+	# The single-page app: real files when they exist, otherwise index.html
+	# so client-side routes (e.g. /patients/123) survive a reload.
+	handle {
+		root * /srv
+		# Vite fingerprints everything under /assets, so it can be cached for good.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@notAssets not path /assets/*
+		header @notAssets Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

@@ -1,0 +1,131 @@
+# WithUnion Clinic - production stack for one VPS.
+#
+#   Internet --443/80--> caddy --(edge network)--> api --(backend network)--> postgres
+#                                                   ^
+#                       migrate (one-shot) ---------+ backend network only
+#
+# Run with the production env file (see .env.production.example and
+# docs/deployment.md):
+#   docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+#
+# The older docker-compose.yml is the development stack; it is not used here.
+
+name: withunion-clinic
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  postgres:
+    # Same major version as development (PostgreSQL 18).
+    image: postgres:18.3-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env.production}
+      TZ: Africa/Addis_Ababa
+      PGTZ: Africa/Addis_Ababa
+    # Reports use the database's CURRENT_DATE, so the server's own time
+    # zone must be clinic time, whatever initdb picked up.
+    command: ["postgres", "-c", "timezone=Africa/Addis_Ababa", "-c", "log_timezone=Africa/Addis_Ababa"]
+    volumes:
+      # PostgreSQL 18 images keep data under /var/lib/postgresql/18/docker
+      # and declare the volume at /var/lib/postgresql (not .../data).
+      - pgdata:/var/lib/postgresql
+    networks: [backend]
+    # No `ports:` - the database is reachable only from containers on `backend`.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *logging
+
+  migrate:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.prod
+      target: migrate
+    image: withunion-clinic-migrate:${APP_VERSION:-local}
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+    restart: "no"
+    logging: *logging
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.prod
+      target: runtime
+    image: withunion-clinic-api:${APP_VERSION:-local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      TZ: Africa/Addis_Ababa
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env.production}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-wu_clinic_sid}
+      SESSION_MAX_AGE_MS: ${SESSION_MAX_AGE_MS:-28800000}
+      # Same origin as the app; the API refuses to start in production without it.
+      CORS_ORIGIN: https://${DOMAIN:?set DOMAIN in .env.production}
+      LOGIN_RATE_LIMIT_WINDOW_MS: ${LOGIN_RATE_LIMIT_WINDOW_MS:-900000}
+      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-10}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CLINIC_NAME: ${CLINIC_NAME:-WithUnion Clinic}
+      CLINIC_ADDRESS: ${CLINIC_ADDRESS:-}
+      CLINIC_PHONE: ${CLINIC_PHONE:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [backend, edge]
+    # No `ports:` - only Caddy talks to the API.
+    logging: *logging
+
+  caddy:
+    build:
+      context: ./frontend
+      dockerfile: ../deploy/caddy/Dockerfile
+      additional_contexts:
+        caddyconf: ./deploy/caddy
+    image: withunion-clinic-caddy:${APP_VERSION:-local}
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 on the same port number
+    volumes:
+      - caddy_data:/data # certificates and keys - keep across upgrades
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [edge]
+    # The official image runs as root; keep only the right to bind 80/443.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    logging: *logging
+
+networks:
+  # internal: no route to the outside world (and none from it).
+  backend:
+    internal: true
+  edge: {}
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

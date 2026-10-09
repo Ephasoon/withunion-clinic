@@ -1,0 +1,12 @@
+# The Caddy image builds the frontend from source; nothing local is reused.
+.env
+.env.*
+!.env.example
+node_modules
+dist
+coverage
+*.log
+*.tsbuildinfo
+.git
+.gitignore
+.dockerignore
