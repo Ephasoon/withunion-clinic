@@ -497,9 +497,20 @@ describe("Patient phone uniqueness", () => {
 });
 
 describe("PATCH /api/v1/patients/:id — status changes and audit actions", () => {
-  async function auditActions(patientId: string, since: Date): Promise<string[]> {
+  /**
+   * The start of an audit window, read from the database clock that
+   * stamps audit_logs.created_at. A Node-side new Date() can run behind
+   * the database clock by a few ms, which pulls the patient.create row
+   * written just before it into the window. Kept as text so Postgres's
+   * microseconds aren't truncated to a JS Date's milliseconds.
+   */
+  async function dbNow(): Promise<string> {
+    return (await pool.query(`SELECT now()::text AS now`)).rows[0].now;
+  }
+
+  async function auditActions(patientId: string, since: string): Promise<string[]> {
     const res = await pool.query(
-      `SELECT action FROM audit_logs WHERE entity = 'patients' AND entity_id = $1 AND created_at >= $2 ORDER BY action`,
+      `SELECT action FROM audit_logs WHERE entity = 'patients' AND entity_id = $1 AND created_at >= $2::timestamptz ORDER BY action`,
       [patientId, since]
     );
     return res.rows.map((r) => r.action);
@@ -515,7 +526,7 @@ describe("PATCH /api/v1/patients/:id — status changes and audit actions", () =
 
   it("deactivating records patient.update and patient.deactivate, by the reception user", async () => {
     const { reception, id } = await newPatient();
-    const since = new Date();
+    const since = await dbNow();
     const res = await reception.patch(`/api/v1/patients/${id}`).send({ status: "inactive" });
     expect(res.status).toBe(200);
     expect(res.body.data.patient.status).toBe("inactive");
@@ -531,7 +542,7 @@ describe("PATCH /api/v1/patients/:id — status changes and audit actions", () =
   it("reactivating records patient.update and patient.reactivate", async () => {
     const { reception, id } = await newPatient();
     await reception.patch(`/api/v1/patients/${id}`).send({ status: "inactive" });
-    const since = new Date();
+    const since = await dbNow();
     const res = await reception.patch(`/api/v1/patients/${id}`).send({ status: "active" });
     expect(res.status).toBe(200);
     expect(await auditActions(id, since)).toEqual(["patient.reactivate", "patient.update"]);
@@ -539,13 +550,13 @@ describe("PATCH /api/v1/patients/:id — status changes and audit actions", () =
 
   it("an edit without a status change, or re-sending the current status, records only patient.update", async () => {
     const { reception, id } = await newPatient();
-    const since = new Date();
+    const since = await dbNow();
     await reception.patch(`/api/v1/patients/${id}`).send({ notes: "no status change" });
     await reception.patch(`/api/v1/patients/${id}`).send({ status: "active" });
     expect(await auditActions(id, since)).toEqual(["patient.update", "patient.update"]);
 
     await reception.patch(`/api/v1/patients/${id}`).send({ status: "inactive" });
-    const since2 = new Date();
+    const since2 = await dbNow();
     await reception.patch(`/api/v1/patients/${id}`).send({ status: "inactive", notes: "still inactive" });
     expect(await auditActions(id, since2)).toEqual(["patient.update"]);
   });
@@ -555,7 +566,7 @@ describe("PATCH /api/v1/patients/:id — status changes and audit actions", () =
     const phone = uniquePhone();
     await reception.post("/api/v1/patients").send({ fullName: "Conflict Owner", gender: "male", approximateAge: 30, phone });
     const { id } = await newPatient();
-    const since = new Date();
+    const since = await dbNow();
     const res = await reception.patch(`/api/v1/patients/${id}`).send({ phone, status: "inactive" });
     expect(res.status).toBe(409);
     expect((await reception.get(`/api/v1/patients/${id}`)).body.data.patient.status).toBe("active");
