@@ -2,7 +2,7 @@ import { PoolClient } from "pg";
 import { pool, withTransaction } from "../../config/db";
 import { AppError } from "../../utils/appError";
 import { transitionVisit, transitionVisitWithClient } from "../visits/visits.service";
-import { EnterResultsInput } from "./laboratory.schema";
+import { EnterResultsInput, SendToLabInput } from "./laboratory.schema";
 
 export interface LabOrderItem {
   id: string;
@@ -15,7 +15,8 @@ export interface LabOrderItem {
 export interface LabOrderDetail {
   id: string;
   visitId: string;
-  consultationId: string;
+  /** null for a lab-only visit sent straight from reception. */
+  consultationId: string | null;
   requestedBy: string;
   requestedByName: string;
   status: string;
@@ -29,7 +30,7 @@ export interface LabOrderDetail {
 interface OrderRow {
   id: string;
   visit_id: string;
-  consultation_id: string;
+  consultation_id: string | null;
   requested_by: string;
   requested_by_name: string;
   status: string;
@@ -285,7 +286,61 @@ export async function completeLabOrder(orderId: string, labTechId: string): Prom
     }
 
     await client.query(`UPDATE laboratory_orders SET status = 'COMPLETED' WHERE id = ANY($1::uuid[])`, [orderIds]);
-    await transitionVisitWithClient(client, order.visitId, "lab_tech", "LAB_COMPLETED", undefined, labTechId);
+    // A lab-only visit (no consultation) has no doctor to review the
+    // results, so it goes straight to billing; otherwise back to the doctor.
+    const toStatus = order.consultationId === null ? "WAITING_FOR_BILLING" : "LAB_COMPLETED";
+    await transitionVisitWithClient(client, order.visitId, "lab_tech", toStatus, undefined, labTechId);
+  });
+
+  return (await getLabOrderDetail(orderId))!;
+}
+
+/**
+ * Reception sends a REGISTERED patient straight to the lab (no nurse,
+ * no doctor). In one transaction: lock the visit, require REGISTERED,
+ * create the order (no consultation) with its items, and move the
+ * visit REGISTERED -> WAITING_FOR_LAB. Duplicate test names (ignoring
+ * case and spacing) are collapsed.
+ */
+export async function sendVisitToLab(
+  visitId: string,
+  receptionId: string,
+  input: SendToLabInput
+): Promise<LabOrderDetail> {
+  const seen = new Set<string>();
+  const testNames = input.testNames.filter((name) => {
+    const key = name.trim().toLowerCase().replace(/\s+/g, " ");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const orderId = await withTransaction(async (client: PoolClient) => {
+    const visit = await client.query<{ status: string }>(`SELECT status FROM visits WHERE id = $1 FOR UPDATE`, [visitId]);
+    if (!visit.rows[0]) {
+      throw new AppError(404, "NOT_FOUND", "Visit not found");
+    }
+    if (visit.rows[0].status !== "REGISTERED") {
+      throw new AppError(
+        409,
+        "INVALID_VISIT_STATE",
+        `A visit can only be sent straight to the lab while it is REGISTERED (currently ${visit.rows[0].status})`
+      );
+    }
+
+    const order = await client.query<{ id: string }>(
+      `INSERT INTO laboratory_orders (visit_id, consultation_id, requested_by) VALUES ($1, NULL, $2) RETURNING id`,
+      [visitId, receptionId]
+    );
+    const params: unknown[] = [order.rows[0].id];
+    const values = testNames.map((name, i) => {
+      params.push(name);
+      return `($1, $${i + 2})`;
+    });
+    await client.query(`INSERT INTO laboratory_order_items (order_id, test_name) VALUES ${values.join(", ")}`, params);
+
+    await transitionVisitWithClient(client, visitId, "reception", "WAITING_FOR_LAB", undefined, receptionId);
+    return order.rows[0].id;
   });
 
   return (await getLabOrderDetail(orderId))!;

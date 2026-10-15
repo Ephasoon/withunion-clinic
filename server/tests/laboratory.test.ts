@@ -492,3 +492,82 @@ describe("Multiple lab rounds and multiple orders per visit", () => {
     expect(statuses.rows.map((r: { status: string }) => r.status)).toEqual(["COMPLETED", "COMPLETED"]);
   });
 });
+
+describe("Lab-only visit sent straight from reception", () => {
+  async function newRegisteredVisit() {
+    const reception = await loginAs("test.reception");
+    const patient = await createTestPatient(`Direct Lab Patient ${Date.now()}-${Math.random()}`);
+    const visitRes = await reception.post("/api/v1/visits").send({ patientId: patient.id });
+    return { reception, visitId: visitRes.body.data.visit.id as string };
+  }
+
+  it("reception sends a registered visit to the lab; lab works it; the visit goes to billing", async () => {
+    const { reception, visitId } = await newRegisteredVisit();
+
+    const sent = await reception
+      .post(`/api/v1/visits/${visitId}/send-to-lab`)
+      .send({ testNames: ["CBC", " cbc ", "Blood group"] });
+    expect(sent.status).toBe(201);
+    const order = sent.body.data.order;
+    expect(order.consultationId).toBeNull();
+    expect(order.visitStatus).toBe("WAITING_FOR_LAB");
+    expect(order.items.map((i: { testName: string }) => i.testName).sort()).toEqual(["Blood group", "CBC"]);
+
+    const lab = await loginAs("test.lab");
+    const queue = await lab.get("/api/v1/laboratory/orders");
+    expect(queue.body.data.orders.some((o: { id: string }) => o.id === order.id)).toBe(true);
+
+    expect((await lab.post(`/api/v1/laboratory/orders/${order.id}/start`)).status).toBe(200);
+
+    const early = await lab.post(`/api/v1/laboratory/orders/${order.id}/complete`);
+    expect(early.status).toBe(409);
+    expect(early.body.error.code).toBe("INCOMPLETE_RESULTS");
+
+    const results = await lab.post(`/api/v1/laboratory/orders/${order.id}/results`).send({
+      results: order.items.map((i: { id: string }) => ({ itemId: i.id, result: "Normal" })),
+    });
+    expect(results.status).toBe(200);
+
+    const done = await lab.post(`/api/v1/laboratory/orders/${order.id}/complete`);
+    expect(done.status).toBe(200);
+    expect(done.body.data.order.visitStatus).toBe("WAITING_FOR_BILLING");
+  });
+
+  it("refuses roles other than reception", async () => {
+    const { visitId } = await newRegisteredVisit();
+    for (const username of ["test.doctor", "test.nurse", "test.lab", "test.owner"]) {
+      const agent = await loginAs(username);
+      const res = await agent.post(`/api/v1/visits/${visitId}/send-to-lab`).send({ testNames: ["CBC"] });
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it("rejects an empty test list and a visit that is no longer REGISTERED", async () => {
+    const { reception, visitId } = await newRegisteredVisit();
+    const empty = await reception.post(`/api/v1/visits/${visitId}/send-to-lab`).send({ testNames: [] });
+    expect(empty.status).toBe(400);
+
+    await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WAITING_FOR_NURSE" });
+    const late = await reception.post(`/api/v1/visits/${visitId}/send-to-lab`).send({ testNames: ["CBC"] });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe("INVALID_VISIT_STATE");
+  });
+
+  it("the generic transition endpoint still refuses WAITING_FOR_LAB", async () => {
+    const { reception, visitId } = await newRegisteredVisit();
+    const res = await reception.post(`/api/v1/visits/${visitId}/transition`).send({ toStatus: "WAITING_FOR_LAB" });
+    expect(res.status).toBe(403);
+  });
+
+  it("a visit that went through a doctor still returns to LAB_COMPLETED", async () => {
+    const { orderId, visitId } = await createOrderWaitingForLab(["Urinalysis"]);
+    const { lab } = await startLabAsTech(orderId);
+    const detail = await lab.get(`/api/v1/laboratory/orders/${orderId}`);
+    await lab.post(`/api/v1/laboratory/orders/${orderId}/results`).send({
+      results: detail.body.data.order.items.map((i: { id: string }) => ({ itemId: i.id, result: "ok" })),
+    });
+    const done = await lab.post(`/api/v1/laboratory/orders/${orderId}/complete`);
+    expect(done.body.data.order.visitStatus).toBe("LAB_COMPLETED");
+    expect(visitId).toBeTruthy();
+  });
+});

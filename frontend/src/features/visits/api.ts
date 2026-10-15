@@ -32,3 +32,15 @@ export async function transitionVisit(
   const { visit } = await api.post<{ visit: Visit }>(`/api/v1/visits/${encodeURIComponent(visitId)}/transition`, body);
   return visit;
 }
+
+/**
+ * POST /api/v1/visits/:id/send-to-lab { testNames } → 201 { order }.
+ * Reception only, REGISTERED visits only: creates a lab order with no
+ * consultation and moves the visit to WAITING_FOR_LAB.
+ */
+export async function sendVisitToLab(visitId: string, testNames: string[]): Promise<{ id: string }> {
+  const { order } = await api.post<{ order: { id: string } }>(`/api/v1/visits/${encodeURIComponent(visitId)}/send-to-lab`, {
+    testNames,
+  });
+  return order;
+}

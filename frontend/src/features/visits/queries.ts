@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { isApiError } from "../../api";
 import { patientKeys } from "../patients/queries";
-import { createVisit, fetchTodayVisits, fetchVisit, transitionVisit } from "./api";
+import { createVisit, fetchTodayVisits, fetchVisit, sendVisitToLab, transitionVisit } from "./api";
 
 export const visitKeys = {
   all: ["visits"] as const,
@@ -59,6 +59,15 @@ export function useTransitionVisit(visitId: string, patientId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: Parameters<typeof transitionVisit>[1]) => transitionVisit(visitId, input),
+    onSettled: () => invalidateAfterVisitChange(queryClient, visitId, patientId),
+  });
+}
+
+/** Reception: send a REGISTERED visit straight to the lab with its tests. */
+export function useSendToLab(visitId: string, patientId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (testNames: string[]) => sendVisitToLab(visitId, testNames),
     onSettled: () => invalidateAfterVisitChange(queryClient, visitId, patientId),
   });
 }

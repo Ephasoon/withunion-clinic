@@ -74,6 +74,7 @@ export const QUEUE_TRANSITIONS: Record<Role, Array<{ from: string; to: string }>
     { from: "__new__", to: "REGISTERED" },
     { from: "REGISTERED", to: "WAITING_FOR_NURSE" },
     { from: "REGISTERED", to: "WAITING_FOR_DOCTOR" }, // explicit nurse-skip
+    { from: "REGISTERED", to: "WAITING_FOR_LAB" }, // lab-only visit (via the send-to-lab flow)
     { from: "WAITING_FOR_BILLING", to: "COMPLETED" },
     { from: "*", to: "CANCELLED" },
   ],
@@ -91,6 +92,7 @@ export const QUEUE_TRANSITIONS: Record<Role, Array<{ from: string; to: string }>
   [ROLES.LAB_TECH]: [
     { from: "WAITING_FOR_LAB", to: "AT_LAB" },
     { from: "AT_LAB", to: "LAB_COMPLETED" },
+    { from: "AT_LAB", to: "WAITING_FOR_BILLING" }, // lab-only visit: no doctor to review
   ],
   [ROLES.PHARMACY]: [
     { from: "WAITING_FOR_PHARMACY", to: "AT_PHARMACY" },

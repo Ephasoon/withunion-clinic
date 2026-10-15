@@ -4,6 +4,7 @@ import { TERMINAL_STATUSES, type Visit, type VisitStatus } from "./types";
 export type VisitAction =
   | { kind: "send"; toStatus: "WAITING_FOR_NURSE"; label: string }
   | { kind: "send"; toStatus: "WAITING_FOR_DOCTOR"; label: string }
+  | { kind: "lab"; toStatus: "WAITING_FOR_LAB"; label: string }
   | { kind: "cancel"; toStatus: "CANCELLED"; label: string };
 
 export function isTerminalStatus(status: VisitStatus): boolean {
@@ -16,6 +17,8 @@ export function isTerminalStatus(status: VisitStatus): boolean {
  * restricted to what the generic transition endpoint allows:
  *
  * - reception: REGISTERED → WAITING_FOR_NURSE, REGISTERED → WAITING_FOR_DOCTOR,
+ *   REGISTERED → WAITING_FOR_LAB (lab-only visit; NOT the generic endpoint —
+ *   it has its own POST /visits/:id/send-to-lab that takes the tests),
  *   and cancel from any non-terminal status.
  * - owner: cancel from any non-terminal status.
  * - every other role, and any terminal visit: nothing.
@@ -33,6 +36,7 @@ export function allowedVisitActions(role: string, status: VisitStatus): VisitAct
       return [
         { kind: "send", toStatus: "WAITING_FOR_NURSE", label: "Send to nurse" },
         { kind: "send", toStatus: "WAITING_FOR_DOCTOR", label: "Send to doctor (skip nursing)" },
+        { kind: "lab", toStatus: "WAITING_FOR_LAB", label: "Send to lab" },
         cancel,
       ];
     }

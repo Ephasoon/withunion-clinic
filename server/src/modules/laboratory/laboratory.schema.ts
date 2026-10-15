@@ -12,3 +12,11 @@ export const EnterResultsSchema = z
   .strict();
 
 export type EnterResultsInput = z.infer<typeof EnterResultsSchema>;
+
+export const SendToLabSchema = z
+  .object({
+    testNames: z.array(z.string().trim().min(1).max(255)).min(1, "at least one test is required").max(50),
+  })
+  .strict();
+
+export type SendToLabInput = z.infer<typeof SendToLabSchema>;

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { EnterResultsSchema } from "./laboratory.schema";
+import { EnterResultsSchema, SendToLabSchema } from "./laboratory.schema";
 import {
   getLabOrderDetail,
   listPendingLabOrders,
@@ -9,6 +9,7 @@ import {
   enterResults,
   completeLabOrder,
   listLabOrdersForVisit,
+  sendVisitToLab,
 } from "./laboratory.service";
 import { AppError } from "../../utils/appError";
 import { recordAudit } from "../../utils/audit";
@@ -151,7 +152,7 @@ laboratoryRouter.post(
         entity: "visits",
         entityId: order.visitId,
         beforeValue: { status: "AT_LAB" },
-        afterValue: { status: "LAB_COMPLETED", reason: null },
+        afterValue: { status: order.visitStatus, reason: null },
         ipAddress: req.ip,
       });
 
@@ -175,3 +176,40 @@ laboratoryVisitReadsRouter.get("/:id/lab-orders", requireAuth, async (req, res, 
     next(err);
   }
 });
+
+// Reception sends a REGISTERED patient straight to the lab (lab-only
+// visit). Creates the order and moves the visit to WAITING_FOR_LAB.
+laboratoryVisitReadsRouter.post(
+  "/:id/send-to-lab",
+  requireAuth,
+  requireRole(ROLES.RECEPTION),
+  validateBody(SendToLabSchema),
+  async (req, res, next) => {
+    try {
+      requireUuidParam(req.params.id, "visit id");
+      const order = await sendVisitToLab(req.params.id, req.session.user!.id, req.body);
+
+      await recordAudit({
+        userId: req.session.user!.id,
+        action: "lab_order.create_direct",
+        entity: "laboratory_orders",
+        entityId: order.id,
+        afterValue: { visitId: order.visitId, tests: order.items.map((i) => i.testName) },
+        ipAddress: req.ip,
+      });
+      await recordAudit({
+        userId: req.session.user!.id,
+        action: "visit.transition",
+        entity: "visits",
+        entityId: order.visitId,
+        beforeValue: { status: "REGISTERED" },
+        afterValue: { status: "WAITING_FOR_LAB", reason: null },
+        ipAddress: req.ip,
+      });
+
+      res.status(201).json({ data: { order }, error: null, meta: null });
+    } catch (err) {
+      next(err);
+    }
+  }
+);

@@ -12,8 +12,13 @@ import {
 const targets = (role: string, status: VisitStatus) => allowedVisitActions(role, status).map((a) => a.toStatus);
 
 describe("allowedVisitActions — reception", () => {
-  it("offers send to nurse, send to doctor and cancel from REGISTERED", () => {
-    expect(targets("reception", "REGISTERED")).toEqual(["WAITING_FOR_NURSE", "WAITING_FOR_DOCTOR", "CANCELLED"]);
+  it("offers send to nurse, send to doctor, send to lab and cancel from REGISTERED", () => {
+    expect(targets("reception", "REGISTERED")).toEqual([
+      "WAITING_FOR_NURSE",
+      "WAITING_FOR_DOCTOR",
+      "WAITING_FOR_LAB",
+      "CANCELLED",
+    ]);
   });
 
   it("offers only cancel from every other non-terminal status", () => {
@@ -47,8 +52,8 @@ describe("allowedVisitActions — owner and other roles", () => {
 });
 
 describe("allowedVisitActions — never offers a module-owned or foreign transition", () => {
-  it("only ever targets WAITING_FOR_NURSE, WAITING_FOR_DOCTOR or CANCELLED, for every role and status", () => {
-    const permitted = new Set(["WAITING_FOR_NURSE", "WAITING_FOR_DOCTOR", "CANCELLED"]);
+  it("only ever targets WAITING_FOR_NURSE, WAITING_FOR_DOCTOR, WAITING_FOR_LAB (lab action only) or CANCELLED", () => {
+    const permitted = new Set(["WAITING_FOR_NURSE", "WAITING_FOR_DOCTOR", "WAITING_FOR_LAB", "CANCELLED"]);
     for (const role of ALL_ROLES) {
       for (const status of VISIT_STATUSES) {
         for (const target of targets(role, status)) expect(permitted.has(target)).toBe(true);
@@ -56,8 +61,8 @@ describe("allowedVisitActions — never offers a module-owned or foreign transit
     }
   });
 
-  it("never targets WAITING_FOR_LAB, LAB_COMPLETED, WAITING_FOR_PHARMACY, WAITING_FOR_BILLING or COMPLETED", () => {
-    const blocked = ["WAITING_FOR_LAB", "LAB_COMPLETED", "WAITING_FOR_PHARMACY", "WAITING_FOR_BILLING", "COMPLETED"];
+  it("never targets LAB_COMPLETED, WAITING_FOR_PHARMACY, WAITING_FOR_BILLING or COMPLETED", () => {
+    const blocked = ["LAB_COMPLETED", "WAITING_FOR_PHARMACY", "WAITING_FOR_BILLING", "COMPLETED"];
     for (const role of ALL_ROLES) {
       for (const status of VISIT_STATUSES) {
         for (const target of targets(role, status)) expect(blocked).not.toContain(target);
@@ -65,10 +70,20 @@ describe("allowedVisitActions — never offers a module-owned or foreign transit
     }
   });
 
-  it("only sends to nurse or doctor from REGISTERED", () => {
+  it("WAITING_FOR_LAB is only ever the separate lab action, never a generic send", () => {
     for (const role of ALL_ROLES) {
       for (const status of VISIT_STATUSES) {
-        const sends = allowedVisitActions(role, status).filter((a) => a.kind === "send");
+        for (const a of allowedVisitActions(role, status)) {
+          if (a.toStatus === "WAITING_FOR_LAB") expect(a.kind).toBe("lab");
+        }
+      }
+    }
+  });
+
+  it("only sends to nurse, doctor or lab from REGISTERED", () => {
+    for (const role of ALL_ROLES) {
+      for (const status of VISIT_STATUSES) {
+        const sends = allowedVisitActions(role, status).filter((a) => a.kind === "send" || a.kind === "lab");
         if (sends.length > 0) expect(status).toBe("REGISTERED");
       }
     }
