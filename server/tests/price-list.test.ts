@@ -25,6 +25,22 @@ afterAll(async () => {
 });
 
 describe("Authorization", () => {
+  it("a doctor can list test names but never sees prices, and cannot touch anything else", async () => {
+    const owner = await loginAs("test.owner");
+    const created = await owner.post("/api/v1/price-list").send({ name: uniqueName("Doctor Visible"), price: 123 });
+    const id = created.body.data.item.id;
+    const doctor = await loginAs("test.doctor");
+    const res = await doctor.get("/api/v1/price-list");
+    expect(res.status).toBe(200);
+    const item = res.body.data.items.find((i: { id: string }) => i.id === id);
+    expect(item).toMatchObject({ id, isActive: true });
+    expect(item.price).toBeUndefined();
+    expect(res.body.data.items.every((i: { price?: number }) => i.price === undefined)).toBe(true);
+    expect((await doctor.get(`/api/v1/price-list/${id}`)).status).toBe(403);
+    expect((await doctor.post("/api/v1/price-list").send({ name: "x", price: 1 })).status).toBe(403);
+    expect((await doctor.patch(`/api/v1/price-list/${id}`).send({ name: "x" })).status).toBe(403);
+  });
+
   it("rejects unauthenticated access to every endpoint", async () => {
     expect((await request(app).get("/api/v1/price-list")).status).toBe(401);
     expect((await request(app).get("/api/v1/price-list/00000000-0000-0000-0000-000000000000")).status).toBe(401);
@@ -37,7 +53,7 @@ describe("Authorization", () => {
     const createRes = await owner.post("/api/v1/price-list").send({ name: uniqueName("Auth Test Item"), price: 100 });
     const id = createRes.body.data.item.id;
 
-    for (const username of ["test.nurse", "test.doctor", "test.lab", "test.pharmacy"]) {
+    for (const username of ["test.nurse", "test.lab", "test.pharmacy"]) {
       const agent = await loginAs(username);
       expect((await agent.get("/api/v1/price-list")).status).toBe(403);
       expect((await agent.get(`/api/v1/price-list/${id}`)).status).toBe(403);

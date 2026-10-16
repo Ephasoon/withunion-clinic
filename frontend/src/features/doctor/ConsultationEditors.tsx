@@ -15,6 +15,8 @@ import {
   type PrescriptionRow,
   type PrescriptionRowErrors,
 } from "./consultationForms";
+import { activePriceListItems } from "../billing/priceListPick";
+import { usePriceList } from "../priceList/queries";
 import { consultationWriteErrorMessage } from "./doctorErrors";
 import type { PrescriptionItemBody } from "./types";
 
@@ -140,6 +142,18 @@ export function DiagnosisForm({ mutation }: { mutation: Mutation<string> }) {
 export function LabOrderForm({ mutation }: { mutation: Mutation<string[]> }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const priceList = usePriceList();
+
+  /** Appends a price-list test to the box (skipping one already there). */
+  const addTest = (name: string) => {
+    if (!name) return;
+    setText((current) => {
+      const lines = current.split(/\r?\n/).map((l) => l.trim().toLowerCase());
+      if (lines.includes(name.trim().toLowerCase())) return current;
+      return current.trim() === "" ? name : `${current.replace(/\s+$/, "")}\n${name}`;
+    });
+    setError(null);
+  };
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -154,6 +168,21 @@ export function LabOrderForm({ mutation }: { mutation: Mutation<string[]> }) {
       <label htmlFor="lab-tests" className="text-sm font-medium text-slate-700">
         Order lab tests <span className="font-normal text-slate-500">(one per line, up to {LAB_ORDER_MAX_TESTS})</span>
       </label>
+      {priceList.data && (
+        <select
+          aria-label="Add a test from the price list"
+          value=""
+          onChange={(e) => addTest(e.target.value)}
+          className={inputClass}
+        >
+          <option value="">Add from price list…</option>
+          {activePriceListItems(priceList.data).map((item) => (
+            <option key={item.id} value={item.name}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+      )}
       <textarea
         id="lab-tests"
         rows={3}

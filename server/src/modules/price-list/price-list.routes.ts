@@ -22,13 +22,19 @@ function requireUuidParam(value: string, label = "id") {
   }
 }
 
-// Owner + Reception — the listing Reception needs to pick a charge
-// when billing, mirroring Inventory's owner + pharmacy listing. Every
-// other Price List endpoint, including GET /:id, stays owner-only.
-priceListRouter.get("/", requireAuth, requireRole(ROLES.OWNER, ROLES.RECEPTION), async (_req, res, next) => {
+// Owner + Reception + Doctor — Reception picks a charge when billing
+// and a lab test when sending a patient to the lab; the Doctor picks
+// lab tests from the same list when ordering (no misspelled names).
+// Every other Price List endpoint, including GET /:id, stays owner-only.
+priceListRouter.get("/", requireAuth, requireRole(ROLES.OWNER, ROLES.RECEPTION, ROLES.DOCTOR), async (req, res, next) => {
   try {
     const items = await listPriceListItems();
-    res.json({ data: { items }, error: null, meta: null });
+    // Doctors get names only (to pick lab tests) — never prices.
+    const visible =
+      req.session.user!.role === ROLES.DOCTOR
+        ? items.map(({ id, name, isActive }) => ({ id, name, isActive }))
+        : items;
+    res.json({ data: { items: visible }, error: null, meta: null });
   } catch (err) {
     next(err);
   }
